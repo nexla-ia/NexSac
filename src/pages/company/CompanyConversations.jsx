@@ -2211,8 +2211,10 @@ export default function CompanyConversations() {
                         const extraText = fileLineMatch?.[3]?.trim() || ''
                         const isPlaceholder = !!fileLine
                         // PDF e imagem nunca mostram a legenda que veio junto — só a mídia
+                        // PDF e imagem nunca mostram texto junto — nem legenda no nosso padrão
+                        // (📄 arquivo\nlegenda) nem texto solto que veio com a mídia (cliente/atendente)
                         const suppressCaption = media?.type === 'pdf' || media?.type === 'image'
-                        const displayContent = isPlaceholder ? (suppressCaption ? '' : extraText) : rawContent
+                        const displayContent = suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
                         const hasOnlyMedia = media && !displayContent
                         const isLongText = !isPlaceholder && displayContent.length > TEXT_LIMIT
                         const isExpanded = expandedMsgIds.has(msg.id)
@@ -2259,11 +2261,23 @@ export default function CompanyConversations() {
                                   <AudioPlayer src={src} />
                                   {msg.transcript ? (
                                     <div style={{
-                                      marginTop: 6, fontSize: 12.5, fontStyle: 'italic',
-                                      color: isAtendente ? 'rgba(255,255,255,0.9)' : 'var(--text-secondary)',
-                                      whiteSpace: 'pre-wrap',
+                                      marginTop: 6, borderRadius: 8, padding: '8px 10px',
+                                      background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
+                                      border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
                                     }}>
-                                      "{msg.transcript}"
+                                      <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
+                                        fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+                                        color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+                                      }}>
+                                        <Sparkles size={10} /> Transcrição
+                                      </div>
+                                      <div style={{
+                                        fontSize: 12.5, whiteSpace: 'pre-wrap',
+                                        color: isAtendente ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)',
+                                      }}>
+                                        {msg.transcript}
+                                      </div>
                                     </div>
                                   ) : (
                                     <button
@@ -2320,11 +2334,23 @@ export default function CompanyConversations() {
                                     </a>
                                     {msg.summary ? (
                                       <div style={{
-                                        marginTop: 6, fontSize: 12.5, fontStyle: 'italic',
-                                        color: isAtendente ? 'rgba(255,255,255,0.9)' : 'var(--text-secondary)',
-                                        whiteSpace: 'pre-wrap',
+                                        marginTop: 6, borderRadius: 8, padding: '8px 10px',
+                                        background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
+                                        border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
                                       }}>
-                                        {msg.summary}
+                                        <div style={{
+                                          display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
+                                          fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+                                          color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+                                        }}>
+                                          <Sparkles size={10} /> Resumo
+                                        </div>
+                                        <div style={{
+                                          fontSize: 12.5, whiteSpace: 'pre-wrap',
+                                          color: isAtendente ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)',
+                                        }}>
+                                          {msg.summary}
+                                        </div>
                                       </div>
                                     ) : (
                                       <button
