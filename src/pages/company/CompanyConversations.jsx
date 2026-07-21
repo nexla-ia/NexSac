@@ -2282,8 +2282,49 @@ export default function CompanyConversations() {
                                 </div>
                               )
                               if (media.type === 'image') return (
-                                <img src={src} alt="mídia" style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', marginBottom: hasOnlyMedia ? 0 : 6, cursor: 'zoom-in' }}
-                                  onClick={() => setLightbox(src)} />
+                                <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
+                                  <img src={src} alt="mídia" style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', cursor: 'zoom-in' }}
+                                    onClick={() => setLightbox(src)} />
+                                  {msg.summary ? (
+                                    <div style={{
+                                      marginTop: 6, borderRadius: 8, padding: '8px 10px',
+                                      background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
+                                      border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
+                                    }}>
+                                      <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
+                                        fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+                                        color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+                                      }}>
+                                        <Sparkles size={10} /> Resumo
+                                      </div>
+                                      <div style={{
+                                        fontSize: 12.5, whiteSpace: 'pre-wrap',
+                                        color: isAtendente ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)',
+                                      }}>
+                                        {msg.summary}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleSummarizePdf(msg)}
+                                      disabled={summarizingId === msg.id}
+                                      style={{
+                                        marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
+                                        fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                                        cursor: summarizingId === msg.id ? 'default' : 'pointer',
+                                        border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
+                                        background: isAtendente ? 'rgba(255,255,255,0.12)' : 'transparent',
+                                        color: isAtendente ? '#fff' : 'var(--text-secondary)',
+                                        opacity: summarizingId === msg.id ? 0.75 : 1,
+                                      }}
+                                    >
+                                      {summarizingId === msg.id ? (
+                                        <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resumindo...</>
+                                      ) : (<><Sparkles size={11} /> Resumir</>)}
+                                    </button>
+                                  )}
+                                </div>
                               )
                               if (media.type === 'video') return (
                                 <video controls style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', marginBottom: hasOnlyMedia ? 0 : 6 }}>
