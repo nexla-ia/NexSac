@@ -9,12 +9,20 @@ import { getEffectiveLimits, reachedLimit, upgradeMessage, formatLimit } from '.
 import {
   Calendar, Plus, X, Pencil, Trash2, ChevronLeft, ChevronRight,
   Clock, User as UserIcon, Phone, ListChecks, CheckCircle2, XCircle, AlertCircle, Settings,
-  MessageSquare, History, Lock, Repeat, Users
+  MessageSquare, History, Lock, Repeat, Users, Bell
 } from 'lucide-react'
 import './Company.css'
 
 const AGENDA_COLORS = ['#2563EB', '#16A34A', '#7C3AED', '#DC2626', '#D97706', '#0891B2', '#DB2777', '#059669']
 const SLOT_OPTIONS = [15, 20, 30, 45, 60, 90]
+const REMINDER_OFFSET_OPTIONS = [
+  { minutes: 30, label: '30 min antes' },
+  { minutes: 60, label: '1 hora antes' },
+  { minutes: 180, label: '3 horas antes' },
+  { minutes: 1440, label: '1 dia antes' },
+  { minutes: 2880, label: '2 dias antes' },
+  { minutes: 10080, label: '7 dias antes' },
+]
 const DAYS_OF_WEEK = [
   { num: 0, label: 'Dom', full: 'Domingo' },
   { num: 1, label: 'Seg', full: 'Segunda' },
@@ -170,6 +178,13 @@ export default function CompanyAgenda() {
   const [recipSearch, setRecipSearch] = useState('')
   const [useCustomMsg, setUseCustomMsg] = useState(false)
   const [customMsg, setCustomMsg] = useState('')
+  const [reminderPresets, setReminderPresets] = useState([])
+  const [newPresetName, setNewPresetName] = useState('')
+  const [savingPreset, setSavingPreset] = useState(false)
+  const [agendaBlocks, setAgendaBlocks] = useState([])
+  const [blockModal, setBlockModal] = useState(null)
+  const [unblockConfirm, setUnblockConfirm] = useState(null)
+  const [savingBlock, setSavingBlock] = useState(false)
 
   // Carrega agendas + agendamentos + contatos
   useEffect(() => {
@@ -348,6 +363,65 @@ export default function CompanyAgenda() {
     setConfirmDeleteAgenda(null)
   }
 
+  // Presets de lembrete da empresa (combos reutilizáveis, ex.: "7 dias e 1 dia antes")
+  useEffect(() => {
+    if (!instance) return
+    supabase.from('reminder_presets').select('*').eq('instancia', instance)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => setReminderPresets(data || []))
+  }, [instance])
+
+  // Bloqueios de horário (ausência/almoço/férias)
+  function loadAgendaBlocks() {
+    if (!instance) return
+    supabase.from('agenda_blocks').select('*').eq('instancia', instance)
+      .then(({ data }) => setAgendaBlocks(data || []))
+  }
+  useEffect(() => { loadAgendaBlocks() }, [instance])
+
+  function blockAt(date, hhmm) {
+    if (!selectedAgendaId) return null
+    const tz = session?.company?.timezone || '-03:00'
+    const dt = new Date(`${fmtDateInput(date)}T${hhmm}:00${tz}`).getTime()
+    return agendaBlocks.find(b =>
+      b.agenda_id === selectedAgendaId &&
+      dt >= new Date(b.starts_at).getTime() &&
+      dt < new Date(b.ends_at).getTime()
+    ) || null
+  }
+
+  async function handleCreateBlock() {
+    if (!blockModal || !selectedAgendaId || savingBlock) return
+    const tz = session?.company?.timezone || '-03:00'
+    const startDate = blockModal.date_start
+    const endDate = blockModal.date_end || blockModal.date_start
+    const startTime = blockModal.all_day ? '00:00' : (blockModal.time_start || '00:00')
+    const endTime = blockModal.all_day ? '23:59' : (blockModal.time_end || '23:59')
+    const startsAt = new Date(`${startDate}T${startTime}:00${tz}`)
+    const endsAt = new Date(`${endDate}T${endTime}:00${tz}`)
+    if (endsAt <= startsAt) { setBlockModal(p => ({ ...p, error: 'O fim precisa ser depois do início.' })); return }
+    setSavingBlock(true)
+    const { error } = await supabase.from('agenda_blocks').insert({
+      instancia: instance,
+      agenda_id: selectedAgendaId,
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
+      reason: blockModal.reason?.trim() || 'Bloqueado',
+      created_by_email: session?.user?.email,
+    })
+    setSavingBlock(false)
+    if (error) { setBlockModal(p => ({ ...p, error: error.message })); return }
+    setBlockModal(null)
+    loadAgendaBlocks()
+  }
+
+  async function handleUnblock() {
+    if (!unblockConfirm) return
+    await supabase.from('agenda_blocks').delete().eq('id', unblockConfirm.id)
+    setUnblockConfirm(null)
+    loadAgendaBlocks()
+  }
+
   function openNewAppt(date, hhmm, prefill = {}) {
     if (!selectedAgendaId) return
     const ag = agendas.find(a => a.id === selectedAgendaId)
@@ -367,6 +441,10 @@ export default function CompanyAgenda() {
       payment_status: 'pendente',
       recurrence: null,
       recurrence_count: 4,
+      reminders: [],
+      reminder_offsets: session?.company?.reminder_enabled && session?.company?.reminder_offset_minutes
+        ? [session.company.reminder_offset_minutes]
+        : [],
     })
     setApptErr('')
     setPatientHistory([])
@@ -417,6 +495,8 @@ export default function CompanyAgenda() {
     setApptModal({
       ...a,
       extra_recipients: a.extra_recipients || [],
+      reminders: a.reminders || [],
+      reminder_offsets: (a.reminders || []).map(r => r.offset_minutes),
       date: dateStr,
       time: timeStr,
       _prevStatus: a.status,
@@ -435,6 +515,17 @@ export default function CompanyAgenda() {
     const startsAt = new Date(`${apptModal.date}T${apptModal.time}:00${tz}`)
     const duration = parseInt(apptModal.duration_minutes) || 30
     const endsAt = new Date(startsAt.getTime() + duration * 60000)
+
+    // Bloqueio de horário (ausência/almoço/férias) — não deixa agendar em cima
+    const blockConflict = agendaBlocks.find(b =>
+      b.agenda_id === apptModal.agenda_id &&
+      startsAt.getTime() < new Date(b.ends_at).getTime() &&
+      new Date(b.starts_at).getTime() < endsAt.getTime()
+    )
+    if (blockConflict) {
+      setApptErr(`Esse horário está bloqueado (${blockConflict.reason || 'sem motivo'}). Desbloqueie antes de agendar.`)
+      return
+    }
 
     // Dia da semana no fuso da clínica (não do browser)
     function dayInTz(date) {
@@ -532,6 +623,12 @@ export default function CompanyAgenda() {
     payload.procedure_id = apptModal.procedure_id || null
     payload.extra_recipients = apptModal.extra_recipients?.length ? apptModal.extra_recipients : null
     payload.price = parseFloat(apptModal.price) || 0
+    // Preserva sent_at dos lembretes já disparados; novos offsets entram com sent_at nulo
+    const prevReminders = apptModal.reminders || []
+    payload.reminders = (apptModal.reminder_offsets || []).map(min => ({
+      offset_minutes: min,
+      sent_at: prevReminders.find(r => r.offset_minutes === min)?.sent_at || null,
+    }))
     payload.payment_status = paymentStatus
     payload.paid_at = paidAt
 
@@ -815,6 +912,17 @@ export default function CompanyAgenda() {
                   <button className="nx-btn-ghost" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setWeekStart(getMonday(new Date()))}>
                     Hoje
                   </button>
+                  <button className="nx-btn-ghost" style={{ fontSize: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 5 }}
+                    disabled={!selectedAgendaId}
+                    onClick={() => setBlockModal({
+                      date_start: fmtDateInput(new Date()),
+                      date_end: fmtDateInput(new Date()),
+                      all_day: true, time_start: '12:00', time_end: '13:00',
+                      reason: '', error: '',
+                    })}
+                  >
+                    <Lock size={12} /> Bloquear horário
+                  </button>
                 </div>
               </div>
 
@@ -855,11 +963,17 @@ export default function CompanyAgenda() {
                         const status = appt ? STATUS_OPTIONS.find(s => s.value === appt.status) : null
                         const slotKey = `${fmtDateInput(d)}_${hhmm}`
                         const isDragOver = dragOverSlot === slotKey
+                        const block = working ? blockAt(d, hhmm) : null
+                        const zebra = idx % 2 === 1
                         return (
                           <div key={i}
-                            onClick={() => !draggingId && working && (appt ? openEditAppt(appt) : openNewAppt(d, hhmm))}
+                            onClick={() => {
+                              if (draggingId || !working) return
+                              if (block) { setUnblockConfirm(block); return }
+                              appt ? openEditAppt(appt) : openNewAppt(d, hhmm)
+                            }}
                             onDragOver={e => {
-                              if (!working) return
+                              if (!working || block) { e.dataTransfer.dropEffect = 'none'; return }
                               const occupied = apptAt(d, hhmm)
                               if (occupied && occupied.id !== e.dataTransfer.types[0]) {
                                 e.dataTransfer.dropEffect = 'none'
@@ -874,7 +988,7 @@ export default function CompanyAgenda() {
                             }}
                             onDrop={async e => {
                               e.preventDefault()
-                              if (!working) return
+                              if (!working || block) return
                               const apptId = e.dataTransfer.getData('apptId')
                               if (!apptId) return
                               const droppedAppt = appointments.find(a => a.id === apptId)
@@ -890,18 +1004,31 @@ export default function CompanyAgenda() {
                               const { error } = await supabase.from('appointments').update({ starts_at: newStartsAt.toISOString() }).eq('id', apptId)
                               if (error) setAppointments(prev => prev.map(a => a.id === apptId ? droppedAppt : a))
                             }}
+                            title={block ? `Bloqueado: ${block.reason || 'sem motivo'} — clique para desbloquear` : undefined}
                             style={{
                               minHeight: 46, borderLeft: '1px solid var(--border)',
-                              background: isDragOver ? '#DBEAFE' : !working ? '#F9FAFB' : 'transparent',
-                              cursor: working ? 'pointer' : 'not-allowed',
+                              background: isDragOver ? '#DBEAFE'
+                                : block ? 'repeating-linear-gradient(45deg, #F1F5F9, #F1F5F9 6px, #E2E8F0 6px, #E2E8F0 12px)'
+                                : !working ? '#F9FAFB'
+                                : zebra ? '#FAFBFC'
+                                : 'transparent',
+                              cursor: working ? (block ? 'not-allowed' : 'pointer') : 'not-allowed',
                               padding: 3, position: 'relative',
                               transition: 'background 0.1s',
                               outline: isDragOver ? '2px dashed #2563EB' : 'none',
                               outlineOffset: '-2px',
                             }}
-                            onMouseEnter={e => { if (working && !appt && !draggingId) e.currentTarget.style.background = '#EFF6FF' }}
-                            onMouseLeave={e => { if (working && !appt && !isDragOver) e.currentTarget.style.background = 'transparent' }}
+                            onMouseEnter={e => { if (working && !appt && !block && !draggingId) e.currentTarget.style.background = '#EFF6FF' }}
+                            onMouseLeave={e => { if (working && !appt && !block && !isDragOver) e.currentTarget.style.background = zebra ? '#FAFBFC' : 'transparent' }}
                           >
+                            {block && !appt && (
+                              <div style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                                height: '100%', color: '#94A3B8', fontSize: 9, fontWeight: 600,
+                              }}>
+                                <Lock size={10} />
+                              </div>
+                            )}
                             {appt && status && (
                               <div
                                 draggable
@@ -1096,6 +1223,89 @@ export default function CompanyAgenda() {
         }}
         onCancel={() => setConfirmDeleteApptDirect(null)}
       />
+
+      <ConfirmModal
+        open={!!unblockConfirm}
+        variant="delete"
+        title="Desbloquear horário"
+        message={unblockConfirm ? `Desbloquear "${unblockConfirm.reason || 'sem motivo'}" (${new Date(unblockConfirm.starts_at).toLocaleString('pt-BR')} até ${new Date(unblockConfirm.ends_at).toLocaleString('pt-BR')})?` : ''}
+        confirmLabel="Desbloquear"
+        onConfirm={handleUnblock}
+        onCancel={() => setUnblockConfirm(null)}
+      />
+
+      {/* Modal: bloquear horário (ausência/almoço/férias) */}
+      {blockModal && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, backdropFilter: 'blur(4px)', padding: '1.5rem' }}>
+          <div className="nx-card" style={{ width: '100%', maxWidth: 420 }}>
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Lock size={15} /> Bloquear horário
+              </div>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setBlockModal(null)}><X size={16} /></button>
+            </div>
+            <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={labelStyle}>De</label>
+                  <input className="nx-input" type="date" value={blockModal.date_start}
+                    onChange={e => setBlockModal(p => ({ ...p, date_start: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Até</label>
+                  <input className="nx-input" type="date" value={blockModal.date_end}
+                    onChange={e => setBlockModal(p => ({ ...p, date_end: e.target.value }))} />
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={blockModal.all_day}
+                  onChange={e => setBlockModal(p => ({ ...p, all_day: e.target.checked }))} />
+                Dia inteiro
+              </label>
+              {!blockModal.all_day && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={labelStyle}>Hora início</label>
+                    <input className="nx-input" type="time" value={blockModal.time_start}
+                      onChange={e => setBlockModal(p => ({ ...p, time_start: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Hora fim</label>
+                    <input className="nx-input" type="time" value={blockModal.time_end}
+                      onChange={e => setBlockModal(p => ({ ...p, time_end: e.target.value }))} />
+                  </div>
+                </div>
+              )}
+              <div>
+                <label style={labelStyle}>Motivo</label>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                  {['Almoço', 'Ausência', 'Férias'].map(r => (
+                    <button key={r} type="button" onClick={() => setBlockModal(p => ({ ...p, reason: r }))}
+                      style={{
+                        fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20, cursor: 'pointer',
+                        border: blockModal.reason === r ? '1.5px solid #2563EB' : '1px solid var(--border)',
+                        background: blockModal.reason === r ? '#EFF6FF' : 'transparent',
+                        color: blockModal.reason === r ? '#2563EB' : 'var(--text-secondary)',
+                      }}
+                    >{r}</button>
+                  ))}
+                </div>
+                <input className="nx-input" placeholder="Motivo (opcional)"
+                  value={blockModal.reason}
+                  onChange={e => setBlockModal(p => ({ ...p, reason: e.target.value }))} />
+              </div>
+              {blockModal.error && <div style={{ fontSize: 12, color: '#DC2626' }}>{blockModal.error}</div>}
+            </div>
+            <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
+              <button className="nx-btn-ghost" style={{ flex: 1 }} onClick={() => setBlockModal(null)}>Cancelar</button>
+              <button className="nx-btn-primary" style={{ flex: 1, justifyContent: 'center' }}
+                onClick={handleCreateBlock} disabled={savingBlock}>
+                {savingBlock ? 'Bloqueando...' : 'Bloquear'}
+              </button>
+            </div>
+          </div>
+        </div>
+      , document.body)}
 
       {/* Context menu botão direito */}
       {ctxMenu && createPortal(
@@ -1431,6 +1641,75 @@ export default function CompanyAgenda() {
                   </div>
                 )
               })()}
+
+              {/* ── Lembretes (múltiplos avisos por agendamento) ── */}
+              <div>
+                <label style={labelStyle}><Bell size={11} style={{ verticalAlign: -1, marginRight: 3 }} />Lembretes</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  {REMINDER_OFFSET_OPTIONS.map(opt => {
+                    const active = (apptModal.reminder_offsets || []).includes(opt.minutes)
+                    return (
+                      <button key={opt.minutes} type="button"
+                        onClick={() => setApptModal(p => ({
+                          ...p,
+                          reminder_offsets: active
+                            ? p.reminder_offsets.filter(m => m !== opt.minutes)
+                            : [...(p.reminder_offsets || []), opt.minutes],
+                        }))}
+                        style={{
+                          fontSize: 12, fontWeight: 600, padding: '5px 11px', borderRadius: 20,
+                          cursor: 'pointer',
+                          border: active ? '1.5px solid #2563EB' : '1px solid var(--border)',
+                          background: active ? '#EFF6FF' : 'transparent',
+                          color: active ? '#2563EB' : 'var(--text-secondary)',
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                {reminderPresets.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Padrões:</span>
+                    {reminderPresets.map(p => (
+                      <button key={p.id} type="button"
+                        onClick={() => setApptModal(m => ({ ...m, reminder_offsets: [...(p.offsets || [])] }))}
+                        style={{
+                          fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 20,
+                          border: '1px solid #DDD6FE', background: '#F5F3FF', color: '#7C3AED', cursor: 'pointer',
+                        }}
+                      >{p.name}</button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input className="nx-input" style={{ fontSize: 12 }}
+                    placeholder="Salvar seleção atual como padrão (nome)…"
+                    value={newPresetName}
+                    onChange={e => setNewPresetName(e.target.value)}
+                  />
+                  <button type="button" className="nx-btn-ghost" style={{ fontSize: 12, flexShrink: 0 }}
+                    disabled={!newPresetName.trim() || !(apptModal.reminder_offsets || []).length || savingPreset}
+                    onClick={async () => {
+                      setSavingPreset(true)
+                      const { error } = await supabase.from('reminder_presets').insert({
+                        instancia: instance, name: newPresetName.trim(),
+                        offsets: apptModal.reminder_offsets || [],
+                      })
+                      setSavingPreset(false)
+                      if (!error) {
+                        setNewPresetName('')
+                        const { data } = await supabase.from('reminder_presets').select('*')
+                          .eq('instancia', instance).order('created_at', { ascending: true })
+                        setReminderPresets(data || [])
+                      }
+                    }}
+                  >
+                    {savingPreset ? 'Salvando...' : 'Salvar padrão'}
+                  </button>
+                </div>
+              </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                 <div>

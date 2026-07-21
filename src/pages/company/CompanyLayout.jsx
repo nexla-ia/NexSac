@@ -20,15 +20,16 @@ export default function CompanyLayout() {
   const instance = session?.company?.instance
   const [activeCount, setActiveCount] = useState(0)
   const [pendingAlerts, setPendingAlerts] = useState(0)
-  const [groupUnread, setGroupUnread] = useState(0)
+  const [groupUnreadMap, setGroupUnreadMap] = useState({}) // idgrupo → true (dedupe por grupo, não por mensagem)
   const [supportOpen, setSupportOpen] = useState(false)
   const [supportUnread, setSupportUnread] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const groupUnread = Object.keys(groupUnreadMap).length
 
   // Fecha sidebar ao trocar de rota (mobile) e zera badge de grupos ao entrar na tela
   useEffect(() => {
     setSidebarOpen(false)
-    if (location.pathname.startsWith('/painel/grupos')) setGroupUnread(0)
+    if (location.pathname.startsWith('/painel/grupos')) setGroupUnreadMap({})
   }, [location.pathname])
   // Trava scroll do body quando drawer aberto
   useEffect(() => {
@@ -101,7 +102,39 @@ export default function CompanyLayout() {
     return () => supabase.removeChannel(ch)
   }, [instance, aiOn, userId])
 
-  // Badge de grupos: conta mensagens novas de clientes em grupos não silenciados
+  // Badge de grupos: contagem inicial (não lidos desde a última leitura, mesmo antes
+  // de abrir a tela de grupos) + contador ao vivo deduplicado por grupo (não por mensagem).
+  useEffect(() => {
+    if (!instance || !session?.user?.email) return
+    let cancelled = false
+    Promise.all([
+      supabase.from('conversation_reads').select('session_id, last_read_at')
+        .eq('instancia', instance).eq('user_email', session.user.email),
+      supabase.from('mensagens_geral').select('idgrupo, created_at')
+        .eq('instancia', instance).not('idgrupo', 'is', null).ilike('type', 'cliente')
+        .order('id', { ascending: false }).limit(5000),
+    ]).then(([{ data: reads }, { data: msgs }]) => {
+      if (cancelled) return
+      const readsMap = {}
+      ;(reads || []).forEach(r => { readsMap[r.session_id] = r.last_read_at })
+      let muted = []
+      try { muted = JSON.parse(localStorage.getItem(`muted_groups_${instance}`) || '[]') } catch {}
+      const seen = new Set()
+      const unreadMap = {}
+      for (const row of (msgs || [])) {
+        if (!row.idgrupo || seen.has(row.idgrupo)) continue
+        seen.add(row.idgrupo)
+        if (muted.includes(row.idgrupo)) continue
+        const lr = readsMap[row.idgrupo]
+        if (!lr || (row.created_at && new Date(row.created_at) > new Date(lr))) {
+          unreadMap[row.idgrupo] = true
+        }
+      }
+      setGroupUnreadMap(unreadMap)
+    })
+    return () => { cancelled = true }
+  }, [instance, session?.user?.email])
+
   useEffect(() => {
     if (!instance) return
     const ch = supabase.channel('layout-groups-unread')
@@ -117,11 +150,11 @@ export default function CompanyLayout() {
           const muted = JSON.parse(localStorage.getItem(`muted_groups_${instance}`) || '[]')
           if (muted.includes(row.idgrupo)) return
         } catch {}
-        setGroupUnread(n => n + 1)
+        setGroupUnreadMap(prev => (prev[row.idgrupo] ? prev : { ...prev, [row.idgrupo]: true }))
       })
       .subscribe()
     return () => supabase.removeChannel(ch)
-  }, [instance])
+  }, [instance, location.pathname])
 
   const isAdmin = session?.user?.role === 'admin'
   const aiEnabled = session?.company?.ai_enabled !== false

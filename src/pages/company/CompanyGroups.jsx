@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import EmojiPicker from 'emoji-picker-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileText, BellOff, Bell, ChevronRight, Loader2, Phone, X, MessageCircle, UserPlus, Check } from 'lucide-react'
+import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileText, BellOff, Bell, ChevronRight, Loader2, Phone, X, MessageCircle, UserPlus, Check, Pencil, Search } from 'lucide-react'
 import { useContactTags, TagList, TagPicker, TagFilter, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import './Company.css'
@@ -54,14 +54,16 @@ function parseTs(row) {
   return raw
 }
 
-function groupLabel(g) {
+function groupLabel(g, customNames = {}) {
+  if (customNames[g.idgrupo]) return customNames[g.idgrupo]
   if (g.nomegrupo) return g.nomegrupo
   return g.idgrupo.replace('@g.us', '')
 }
 
 function senderLabel(row) {
-  if (row.nome) return row.nome
-  return (row.numero || '').replace(/@.*$/, '')
+  const numero = (row.numero || '').replace(/@.*$/, '')
+  if (row.nome) return numero ? `${row.nome} · ${numero}` : row.nome
+  return numero
 }
 
 function detectMedia(b64) {
@@ -103,6 +105,9 @@ export default function CompanyGroups() {
   const apiInstancia = session?.company?.api_instancia
   const instanceOwner = session?.company?.numero_base || null
   const [groups, setGroups] = useState([])
+  const [customNames, setCustomNames] = useState({}) // idgrupo → nome customizado (renomear na plataforma)
+  const [renameModal, setRenameModal] = useState(null) // { idgrupo, value }
+  const [savingRename, setSavingRename] = useState(false)
   const [selected, setSelected] = useState(null)
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -129,6 +134,12 @@ export default function CompanyGroups() {
   const [savedContact, setSavedContact] = useState(null)
   const [hasMoreMsgs, setHasMoreMsgs] = useState(false)
   const [loadingMoreMsgs, setLoadingMoreMsgs] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [highlightId, setHighlightId] = useState(null)
+  const msgRefs = useRef({})
   const [showEmoji, setShowEmoji] = useState(false)
   const [mentionMembers, setMentionMembers] = useState([])   // lista de membros para mention
   const [mentionLoading, setMentionLoading] = useState(false)
@@ -258,6 +269,37 @@ export default function CompanyGroups() {
         setLoading(false)
       })
   }, [instance])
+
+  // Nomes customizados (renomear grupo só na plataforma)
+  useEffect(() => {
+    if (!instance) return
+    supabase.from('group_custom_names').select('idgrupo, custom_name').eq('instancia', instance)
+      .then(({ data }) => {
+        const map = {}
+        ;(data || []).forEach(r => { map[r.idgrupo] = r.custom_name })
+        setCustomNames(map)
+      })
+  }, [instance])
+
+  async function handleSaveRename() {
+    if (!renameModal || savingRename) return
+    const name = renameModal.value.trim()
+    setSavingRename(true)
+    const { error } = name
+      ? await supabase.from('group_custom_names')
+          .upsert({ instancia: instance, idgrupo: renameModal.idgrupo, custom_name: name }, { onConflict: 'instancia,idgrupo' })
+      : await supabase.from('group_custom_names').delete().eq('instancia', instance).eq('idgrupo', renameModal.idgrupo)
+    setSavingRename(false)
+    if (!error) {
+      setCustomNames(prev => {
+        const next = { ...prev }
+        if (name) next[renameModal.idgrupo] = name
+        else delete next[renameModal.idgrupo]
+        return next
+      })
+      setRenameModal(null)
+    }
+  }
 
   const MSG_PAGE = 50
 
@@ -507,6 +549,75 @@ export default function CompanyGroups() {
     setLoadingMoreMsgs(false)
   }
 
+  function scrollToMessage(dbId) {
+    requestAnimationFrame(() => {
+      msgRefs.current[dbId]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightId(dbId)
+      setTimeout(() => setHighlightId(prev => (prev === dbId ? null : prev)), 1600)
+    })
+  }
+
+  async function jumpToMessage(dbId) {
+    if (!dbId || !selected || !instance) return
+    if (messages.some(m => m.id === dbId)) { scrollToMessage(dbId); return }
+    setLoadingMoreMsgs(true)
+    skipScrollRef.current = true
+    const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
+    const oldestId = messages[0]?.id
+    const { data, error } = await supabase.from(CONV_TABLE)
+      .select('id, numero, nome, type, mensagem, base64, "horaLastMessage", created_at')
+      .eq('instancia', instance)
+      .eq('idgrupo', selected.idgrupo)
+      .gte('id', dbId)
+      .lt('id', oldestId || Number.MAX_SAFE_INTEGER)
+      .order('id', { ascending: true })
+      .limit(500)
+    if (!error && data?.length) {
+      setHasMoreMsgs(true)
+      setMessages(prev => {
+        const seenIds = new Set(prev.map(m => m.id))
+        return [...data.filter(m => !seenIds.has(m.id)), ...prev]
+      })
+      requestAnimationFrame(() => {
+        if (chatBodyRef.current) {
+          chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight - prevScrollHeight
+        }
+        scrollToMessage(dbId)
+      })
+    }
+    setLoadingMoreMsgs(false)
+  }
+
+  // Busca por palavras no histórico inteiro do grupo (não só o que está carregado)
+  useEffect(() => {
+    if (!searchOpen || !selected || !instance) return
+    const q = searchQuery.trim()
+    if (!q) { setSearchResults([]); setSearchLoading(false); return }
+    setSearchLoading(true)
+    const esc = q.replace(/[\\%_]/g, s => '\\' + s)
+    const timer = setTimeout(() => {
+      supabase.from(CONV_TABLE)
+        .select('id, numero, nome, type, mensagem, "horaLastMessage", created_at')
+        .eq('instancia', instance)
+        .eq('idgrupo', selected.idgrupo)
+        .ilike('mensagem', `%${esc}%`)
+        .order('id', { ascending: false })
+        .limit(80)
+        .then(({ data }) => {
+          setSearchResults(data || [])
+          setSearchLoading(false)
+        })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery, searchOpen, selected, instance])
+
+  function handleSearchResultClick(row) {
+    jumpToMessage(row.id)
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchResults([])
+  }
+
   function toggleMute(idgrupo) {
     const current = getMutedGroups(instance)
     const next = current.includes(idgrupo)
@@ -662,7 +773,7 @@ export default function CompanyGroups() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontWeight: unread ? 800 : 600, fontSize: 13.5, color: isMuted ? 'var(--text-muted)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {groupLabel(g)}
+                      {groupLabel(g, customNames)}
                     </span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
                       <span style={{ fontSize: 11, color: unread ? '#2563EB' : 'var(--text-muted)', fontWeight: unread ? 700 : 400 }}>
@@ -720,14 +831,31 @@ export default function CompanyGroups() {
                   }}
                 >
                   <div style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {groupLabel(selected)}
+                    {groupLabel(selected, customNames)}
                     <ChevronRight size={14} color="#6B7280" style={{ flexShrink: 0 }} />
                   </div>
                   <div style={{ fontSize: 11, color: '#2563EB' }}>
                     Ver integrantes
                   </div>
                 </button>
+                <button
+                  onClick={() => setRenameModal({ idgrupo: selected.idgrupo, value: customNames[selected.idgrupo] || selected.nomegrupo || '' })}
+                  title="Renomear grupo (só nesta plataforma)"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4, flexShrink: 0 }}
+                >
+                  <Pencil size={13} />
+                </button>
               </div>
+              <button
+                onClick={() => setSearchOpen(v => !v)}
+                title="Buscar no grupo"
+                style={{
+                  background: searchOpen ? '#EFF6FF' : 'none', border: 'none', cursor: 'pointer',
+                  color: searchOpen ? '#2563EB' : 'var(--text-muted)', padding: 7, borderRadius: 8, flexShrink: 0,
+                }}
+              >
+                <Search size={15} />
+              </button>
               <TagPicker
                 instancia={instance}
                 numero={selected.idgrupo}
@@ -735,6 +863,52 @@ export default function CompanyGroups() {
                 anchor="bottom-right"
               />
             </div>
+
+            {searchOpen && (
+              <div style={{ borderBottom: '1px solid var(--border)', background: '#fff', flexShrink: 0 }}>
+                <div style={{ padding: '10px 18px', display: 'flex', gap: 8 }}>
+                  <input
+                    className="nx-input"
+                    autoFocus
+                    style={{ flex: 1 }}
+                    placeholder="Buscar mensagens nesse grupo..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Escape' && setSearchOpen(false)}
+                  />
+                  <button className="nx-btn-ghost" onClick={() => setSearchOpen(false)} title="Fechar busca">
+                    <X size={14} />
+                  </button>
+                </div>
+                {searchQuery.trim() && (
+                  <div style={{ maxHeight: 260, overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
+                    {searchLoading && (
+                      <div style={{ padding: '14px 18px', fontSize: 12, color: 'var(--text-muted)' }}>Buscando...</div>
+                    )}
+                    {!searchLoading && searchResults.length === 0 && (
+                      <div style={{ padding: '14px 18px', fontSize: 12, color: 'var(--text-muted)' }}>Nenhum resultado.</div>
+                    )}
+                    {!searchLoading && searchResults.map(r => (
+                      <div
+                        key={r.id}
+                        onClick={() => handleSearchResultClick(r)}
+                        style={{ padding: '9px 18px', cursor: 'pointer', borderBottom: '1px solid #F8FAFC' }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#4F46E5' }}>{senderLabel(r)}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatTime(parseTs(r))}</span>
+                        </div>
+                        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.mensagem}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Painel de integrantes do grupo */}
             {groupInfoOpen && (
@@ -747,7 +921,7 @@ export default function CompanyGroups() {
                 <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 14 }}>Integrantes</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{groupLabel(selected)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{groupLabel(selected, customNames)}</div>
                   </div>
                   <button onClick={() => setGroupInfoOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
                     <X size={16} />
@@ -888,7 +1062,13 @@ export default function CompanyGroups() {
                 const ts = parseTs(msg)
                 const media = detectMedia(msg.base64)
                 return (
-                  <div key={msg.id} className={`msg-row ${isAtendente ? 'client' : 'ai'}`}>
+                  <div key={msg.id} className={`msg-row ${isAtendente ? 'client' : 'ai'}`}
+                    ref={el => { if (el) msgRefs.current[msg.id] = el }}
+                    style={{
+                      borderRadius: 10, transition: 'background-color 0.4s',
+                      background: highlightId === msg.id ? 'rgba(79,70,229,0.14)' : 'transparent',
+                    }}
+                  >
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isAtendente ? 'flex-end' : 'flex-start', maxWidth: '70%' }}>
                       {!isAtendente && (
                         <span style={{ fontSize: 11, fontWeight: 600, color: '#4F46E5', marginBottom: 3, marginLeft: 2 }}>
@@ -1151,10 +1331,57 @@ export default function CompanyGroups() {
               ? <><Bell size={14} color="#16A34A" /> Ativar notificações</>
               : <><BellOff size={14} color="#6B7280" /> Silenciar grupo</>}
           </button>
+          <button
+            onClick={() => {
+              setRenameModal({ idgrupo: contextMenu.group.idgrupo, value: customNames[contextMenu.group.idgrupo] || contextMenu.group.nomegrupo || '' })
+              setContextMenu(null)
+            }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%', padding: '8px 12px', border: 'none',
+              background: 'none', cursor: 'pointer', borderRadius: 6,
+              fontSize: 13, color: 'var(--text-primary)', textAlign: 'left',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover, #F3F4F6)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'none'}
+          >
+            <Pencil size={14} color="#6B7280" /> Renomear grupo
+          </button>
         </div>
       </>,
       document.body
     )}
+
+    {renameModal && createPortal(
+      <div style={{
+        position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 9999, backdropFilter: 'blur(4px)', padding: '1.5rem',
+      }} onClick={() => !savingRename && setRenameModal(null)}>
+        <div className="nx-card" style={{ width: '100%', maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+          <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>Renomear grupo</div>
+            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setRenameModal(null)}><X size={16} /></button>
+          </div>
+          <div style={{ padding: '1.25rem 1.5rem' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+              Só muda o nome exibido aqui na plataforma — não altera o nome real do grupo no WhatsApp.
+            </div>
+            <input className="nx-input" autoFocus placeholder="Nome do grupo"
+              value={renameModal.value}
+              onChange={e => setRenameModal(p => ({ ...p, value: e.target.value }))}
+              onKeyDown={e => e.key === 'Enter' && handleSaveRename()}
+            />
+          </div>
+          <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', gap: 10 }}>
+            <button className="nx-btn-ghost" style={{ flex: 1 }} onClick={() => setRenameModal(null)}>Cancelar</button>
+            <button className="nx-btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={savingRename} onClick={handleSaveRename}>
+              {savingRename ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    , document.body)}
     </>
   )
 }

@@ -213,6 +213,8 @@ export default function CompanyFinanceiro() {
   const [transactions, setTransactions] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+  const [reloadTick, setReloadTick] = useState(0)
 
   const [filterMonth, setFilterMonth] = useState(currentMonthStr())
   const [filterStatus, setFilterStatus] = useState('todos')
@@ -242,20 +244,50 @@ export default function CompanyFinanceiro() {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     if (!instance) return
+    let cancelled = false
     setLoading(true)
+    setLoadError(null)
     const y = new Date().getFullYear()
+
+    // PostgREST corta em 1000 linhas por request — sem paginar, clínicas com
+    // muito movimento perdem os lançamentos mais antigos (vencidos!) e os totais
+    // ficam errados. Pagina com .range() até trazer tudo.
+    async function fetchAllTransactions() {
+      const PAGE = 1000
+      let all = []
+      let from = 0
+      while (true) {
+        const { data, error } = await supabase.from('financial_transactions').select('*')
+          .eq('instancia', instance)
+          .gte('vencimento', `${y-1}-01-01`).lte('vencimento', `${y+1}-12-31`)
+          .order('vencimento', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (error) throw error
+        all = all.concat(data || [])
+        if (!data || data.length < PAGE) break
+        from += PAGE
+      }
+      return all
+    }
+
     Promise.all([
-      supabase.from('financial_transactions').select('*').eq('instancia', instance)
-        .gte('vencimento', `${y-1}-01-01`).lte('vencimento', `${y+1}-12-31`)
-        .order('vencimento', { ascending: false }),
+      fetchAllTransactions(),
       supabase.from('financial_categories').select('*')
-        .in('instancia', [instance, '_default_']).order('nome'),
-    ]).then(([{ data: tx }, { data: cats }]) => {
-      if (tx) setTransactions(tx)
-      if (cats) setCategories(cats)
+        .in('instancia', [instance, '_default_']).order('nome')
+        .then(({ data, error }) => { if (error) throw error; return data }),
+    ]).then(([tx, cats]) => {
+      if (cancelled) return
+      setTransactions(tx || [])
+      setCategories(cats || [])
+      setLoading(false)
+    }).catch(err => {
+      if (cancelled) return
+      setLoadError(err.message || 'Erro ao carregar dados financeiros')
       setLoading(false)
     })
-  }, [instance])
+    return () => { cancelled = true }
+  }, [instance, reloadTick])
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const catMap = useMemo(() => {
@@ -512,6 +544,27 @@ export default function CompanyFinanceiro() {
         </div>
       </div>
 
+      {loadError && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          background: C.roseDim, border: `1px solid ${C.rose}`, borderRadius: 10,
+          padding: '12px 16px', marginBottom: 20,
+        }}>
+          <div style={{ fontSize: 13, color: C.rose, fontWeight: 600 }}>
+            Não foi possível carregar os dados financeiros: {loadError}
+          </div>
+          <button
+            onClick={() => setReloadTick(t => t + 1)}
+            style={{
+              flexShrink: 0, background: C.rose, color: '#fff', border: 'none',
+              borderRadius: 8, padding: '7px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            Tentar de novo
+          </button>
+        </div>
+      )}
+
       {/* Summary cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
         <MetricCard label="A Receber" value={summary.aReceber} icon={ArrowUpCircle} color={C.emerald} bg={C.emeraldDim} loading={loading} delta />
@@ -734,10 +787,14 @@ export default function CompanyFinanceiro() {
           ) : filteredTx.length === 0 ? (
             <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: '3rem', textAlign: 'center', color: C.muted }}>
               <DollarSign size={28} style={{ opacity: 0.15, marginBottom: 10 }} />
-              <div style={{ fontSize: 14 }}>Nenhum lançamento neste período.</div>
-              <button className="nx-btn-ghost" onClick={openNew} style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                <Plus size={13} /> Criar lançamento
-              </button>
+              <div style={{ fontSize: 14 }}>
+                {loadError ? 'Não foi possível carregar os lançamentos.' : 'Nenhum lançamento neste período.'}
+              </div>
+              {!loadError && (
+                <button className="nx-btn-ghost" onClick={openNew} style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  <Plus size={13} /> Criar lançamento
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, overflow: 'hidden' }}>

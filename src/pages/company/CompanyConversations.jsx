@@ -4,9 +4,10 @@ import EmojiPicker from 'emoji-picker-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film } from 'lucide-react'
+import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2 } from 'lucide-react'
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
+import { canonSession, numeroVariants } from '../../lib/phone'
 import './Company.css'
 
 const CONV_TABLE = 'mensagens_geral'
@@ -123,16 +124,24 @@ function formatContactTime(ts) {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
 
-const REASONS = [
-  { value: 'agendado',       label: 'Agendado',    color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
-  { value: 'resolvido',      label: 'Resolvido',   color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
-  { value: 'encaminhado',    label: 'Encaminhado', color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
-  { value: 'desistiu',       label: 'Desistiu',    color: '#DC2626', bg: '#FEF2F2', border: '#FECACA' },
-  { value: 'auto_encerrado', label: 'Expirado',    color: '#6B7280', bg: '#F9FAFB', border: '#E5E7EB' },
+// Motivos padrão — usados só pra semear conversation_close_reasons na 1ª vez
+// (ou restaurar sob demanda). A lista efetiva mostrada na UI vem do banco,
+// então cada empresa pode editar nome/cor ou adicionar motivos próprios.
+const DEFAULT_REASONS = [
+  { value: 'agendado',       label: 'Agendado',    color: '#16A34A' },
+  { value: 'resolvido',      label: 'Resolvido',   color: '#2563EB' },
+  { value: 'encaminhado',    label: 'Encaminhado', color: '#7C3AED' },
+  { value: 'desistiu',       label: 'Desistiu',    color: '#DC2626' },
+  { value: 'auto_encerrado', label: 'Expirado',    color: '#6B7280' },
 ]
 
+function reasonStyle(color) {
+  const c = color || '#6B7280'
+  return { bg: c + '14', border: c + '55' }
+}
+
 const AUTO_CLOSE_HOURS = 2
-const MANUAL_REASONS = REASONS.filter(r => r.value !== 'auto_encerrado')
+const TEXT_LIMIT = 400
 
 const SPEEDS = [1, 1.5, 2]
 
@@ -196,6 +205,15 @@ export default function CompanyConversations() {
   const [closeModal, setCloseModal]   = useState(null)
   const [reason, setReason]           = useState('')
   const [closing, setClosing]         = useState(false)
+  const [reasons, setReasons]         = useState([]) // motivos de encerramento (editáveis, vêm do banco)
+  const [manageReasonsOpen, setManageReasonsOpen] = useState(false)
+  const [editingReasonId, setEditingReasonId]     = useState(null)
+  const [editingReasonLabel, setEditingReasonLabel] = useState('')
+  const [editingReasonColor, setEditingReasonColor] = useState('#6B7280')
+  const [addingReason, setAddingReason]   = useState(false)
+  const [newReasonLabel, setNewReasonLabel] = useState('')
+  const [newReasonColor, setNewReasonColor] = useState('#2563EB')
+  const [savingReason, setSavingReason]   = useState(false)
   const [toast, setToast]             = useState(null)
   const [msgText, setMsgText]         = useState('')
   const [sending, setSending]         = useState(false)
@@ -214,11 +232,23 @@ export default function CompanyConversations() {
   const [editingMsgId, setEditingMsgId]   = useState(null)
   const [editingText, setEditingText]     = useState('')
   const [savingEdit, setSavingEdit]       = useState(false)
+  const [deletingMsgId, setDeletingMsgId] = useState(null)
+  const [togglingAwaiting, setTogglingAwaiting] = useState(false)
+  const [expandedMsgIds, setExpandedMsgIds] = useState(() => new Set())
+  const [transcribingId, setTranscribingId] = useState(null)
+  const [summarizingId, setSummarizingId] = useState(null)
   const [showEmoji, setShowEmoji]         = useState(false)
   const emojiPickerRef                    = useRef(null)
   const [readsMap, setReadsMap]           = useState({}) // session_id → last_read_at ISO
   const [readsLoaded, setReadsLoaded]     = useState(false)
   const [unreadCounts, setUnreadCounts]   = useState({}) // session_id → number
+  const [replyTo, setReplyTo]             = useState(null) // mensagem sendo respondida/citada
+  const [highlightId, setHighlightId]     = useState(null) // id de mensagem pra piscar ao pular
+  const [searchOpen, setSearchOpen]       = useState(false)
+  const [searchQuery, setSearchQuery]     = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const msgRefs = useRef({})
   const mediaRecorderRef = useRef(null)
   const audioChunksRef   = useRef([])
   const recordTimerRef   = useRef(null)
@@ -276,7 +306,7 @@ export default function CompanyConversations() {
       unread.map(c =>
         supabase.from(CONV_TABLE)
           .select('id', { count: 'exact', head: true })
-          .eq('numero', c.session_id)
+          .in('numero', numeroVariants(c.session_id))
           .eq('instancia', instance)
           .ilike('type', 'cliente')
           .gt('created_at', readsMap[c.session_id] || '1970-01-01T00:00:00Z')
@@ -385,8 +415,8 @@ export default function CompanyConversations() {
   useEffect(() => {
     const target = searchParams.get('contact')
     if (!target || loadingContacts) return
-    const cleanTarget = target.replace(/\D/g, '')
-    const sessionId = `${cleanTarget}@s.whatsapp.net`
+    const sessionId = canonSession(target)
+    const cleanTarget = formatPhone(sessionId)
     const existing = contacts.find(c => c.session_id === sessionId || c.phone === cleanTarget)
     if (existing) {
       setSelected(existing)
@@ -499,15 +529,16 @@ export default function CompanyConversations() {
           for (const row of data) {
             if (row.idgrupo) continue
             const t = (row.type || '').toLowerCase()
-            if ((t === 'atendente' || t === 'humano') && row.numero) {
-              hasOutsideHuman.add(row.numero)
+            if ((t === 'atendente' || t === 'humano') && row.numero && !row.numero.includes('@g.us')) {
+              hasOutsideHuman.add(canonSession(row.numero))
             }
           }
+          // Canonicaliza (junta com/sem o 9 extra) pra não rachar a conversa em duas
           for (const row of data) {
-            const sid = row.numero
-            if (!sid || seen.has(sid)) continue
-            if (sid.includes('@g.us')) continue  // ignora grupos do WhatsApp
-            if (row.idgrupo) continue            // mensagem de grupo → tela de grupos
+            if (!row.numero || row.numero.includes('@g.us')) continue  // ignora grupos do WhatsApp
+            if (row.idgrupo) continue                                  // mensagem de grupo → tela de grupos
+            const sid = canonSession(row.numero)
+            if (seen.has(sid)) continue
             seen.add(sid)
             unique.push({
               session_id: sid,
@@ -584,8 +615,8 @@ export default function CompanyConversations() {
           if (row.aplicativo && row.aplicativo !== 'whatsapp') return
           // Mensagem de grupo → tela de grupos, não toca aqui
           if (row.idgrupo) return
-          const sid = row.numero
-          if (!sid || sid.includes('@g.us')) return
+          if (!row.numero || row.numero.includes('@g.us')) return
+          const sid = canonSession(row.numero)
           const incomingType = (row.type || '').toLowerCase()
           const ts = getTimestamp(row)
 
@@ -601,6 +632,14 @@ export default function CompanyConversations() {
           const isClientMsg = incomingType === 'cliente' || incomingType === 'human'
           if (isClientMsg && selectedRef.current?.session_id !== sid) {
             setUnreadCounts(prev => ({ ...prev, [sid]: (prev[sid] || 0) + 1 }))
+          }
+          // Cliente respondeu → limpa "aguardando paciente" automaticamente
+          if (isClientMsg) {
+            setAttendancesMap(prev => {
+              if (!prev[sid]?.awaiting_client) return prev
+              supabase.from('attendances').update({ awaiting_client: false }).eq('numero', sid).eq('instancia', instance).then(() => {})
+              return { ...prev, [sid]: { ...prev[sid], awaiting_client: false } }
+            })
           }
 
           setContacts(prev => {
@@ -629,6 +668,8 @@ export default function CompanyConversations() {
                 base64: row.base64 || null,
                 nome: sentNome || row.nome || null,
                 ts,
+                quoted_id_mensagem: row.quoted_id_mensagem || null,
+                quoted_text: row.quoted_text || null,
               }]
             })
           }
@@ -662,9 +703,9 @@ export default function CompanyConversations() {
     setLoadingMsgs(true)
     setMessages([])
     setHasMoreMsgs(false)
-    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at')
+    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary')
       .eq('instancia', instance)
-      .eq('numero', selected.session_id)
+      .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
       .or('aplicativo.eq.whatsapp,aplicativo.is.null')
       .order('id', { ascending: false })
@@ -681,6 +722,10 @@ export default function CompanyConversations() {
             base64: r.base64 || null,
             nome: r.nome || null,
             ts: getTimestamp(r),
+            quoted_id_mensagem: r.quoted_id_mensagem || null,
+            quoted_text: r.quoted_text || null,
+            transcript: r.transcript || null,
+            summary: r.summary || null,
           })))
         }
         setLoadingMsgs(false)
@@ -694,9 +739,9 @@ export default function CompanyConversations() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary')
       .eq('instancia', instance)
-      .eq('numero', selected.session_id)
+      .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
       .or('aplicativo.eq.whatsapp,aplicativo.is.null')
       .lt('id', oldestId)
@@ -713,6 +758,10 @@ export default function CompanyConversations() {
         base64: r.base64 || null,
         nome: r.nome || null,
         ts: getTimestamp(r),
+        quoted_id_mensagem: r.quoted_id_mensagem || null,
+        quoted_text: r.quoted_text || null,
+            transcript: r.transcript || null,
+            summary: r.summary || null,
       }))
       skipScrollRef.current = true
       setMessages(prev => [...older, ...prev])
@@ -723,6 +772,94 @@ export default function CompanyConversations() {
       })
     }
     setLoadingMoreMsgs(false)
+  }
+
+  function scrollToMessage(dbId) {
+    requestAnimationFrame(() => {
+      msgRefs.current[dbId]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightId(dbId)
+      setTimeout(() => setHighlightId(prev => (prev === dbId ? null : prev)), 1600)
+    })
+  }
+
+  // Pula pra uma mensagem: se já está carregada, só rola até ela; senão busca
+  // o intervalo faltante no banco (considera as variantes do número — §1.1) e prepend.
+  async function jumpToMessage(dbId) {
+    if (!dbId || !selected || !instance) return
+    if (messages.some(m => m.id === dbId)) { scrollToMessage(dbId); return }
+    setLoadingMoreMsgs(true)
+    skipScrollRef.current = true
+    const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
+    const oldestId = messages[0]?.id
+    const { data, error } = await supabase.from(CONV_TABLE)
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary')
+      .eq('instancia', instance)
+      .in('numero', numeroVariants(selected.session_id))
+      .is('idgrupo', null)
+      .or('aplicativo.eq.whatsapp,aplicativo.is.null')
+      .gte('id', dbId)
+      .lt('id', oldestId || Number.MAX_SAFE_INTEGER)
+      .order('id', { ascending: true })
+      .limit(500)
+    if (!error && data?.length) {
+      const older = data.filter(r => !isToolMessage(r)).map(r => ({
+        id: r.id,
+        id_mensagem: r.id_mensagem || null,
+        type: getMessageType(r),
+        content: getMessageContent(r),
+        base64: r.base64 || null,
+        nome: r.nome || null,
+        ts: getTimestamp(r),
+        quoted_id_mensagem: r.quoted_id_mensagem || null,
+        quoted_text: r.quoted_text || null,
+            transcript: r.transcript || null,
+            summary: r.summary || null,
+      }))
+      setHasMoreMsgs(true)
+      setMessages(prev => {
+        const seenIds = new Set(prev.map(m => m.id))
+        return [...older.filter(m => !seenIds.has(m.id)), ...prev]
+      })
+      requestAnimationFrame(() => {
+        if (chatBodyRef.current) {
+          chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight - prevScrollHeight
+        }
+        scrollToMessage(dbId)
+      })
+    }
+    setLoadingMoreMsgs(false)
+  }
+
+  // Busca por palavras no histórico inteiro da conversa (não só o que está carregado)
+  useEffect(() => {
+    if (!searchOpen || !selected || !instance) return
+    const q = searchQuery.trim()
+    if (!q) { setSearchResults([]); setSearchLoading(false); return }
+    setSearchLoading(true)
+    const esc = q.replace(/[\\%_]/g, s => '\\' + s)
+    const timer = setTimeout(() => {
+      supabase.from(CONV_TABLE)
+        .select('id, mensagem, type, nome, "horaLastMessage", created_at')
+        .eq('instancia', instance)
+        .in('numero', numeroVariants(selected.session_id))
+        .is('idgrupo', null)
+        .or('aplicativo.eq.whatsapp,aplicativo.is.null')
+        .ilike('mensagem', `%${esc}%`)
+        .order('id', { ascending: false })
+        .limit(80)
+        .then(({ data }) => {
+          setSearchResults((data || []).filter(r => !isToolMessage(r)))
+          setSearchLoading(false)
+        })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery, searchOpen, selected, instance])
+
+  function handleSearchResultClick(row) {
+    jumpToMessage(row.id)
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchResults([])
   }
 
   useEffect(() => {
@@ -739,6 +876,10 @@ export default function CompanyConversations() {
 
   function handleSelectContact(c) {
     setSelected(c)
+    setReplyTo(null)
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchResults([])
     if (!unreadCounts[c.session_id]) return
     setUnreadCounts(prev => { const n = { ...prev }; delete n[c.session_id]; return n })
     const now = new Date().toISOString()
@@ -1063,10 +1204,12 @@ export default function CompanyConversations() {
       }
       const text = msgText.trim()
       const file = attachedFile
+      const quoting = replyTo
       setMsgText('')
       setRecordedAudio(null)
       setRecordTime(0)
       setAttachedFile(null)
+      setReplyTo(null)
 
       const filePrefix = file
         ? (file.kind === 'image' ? '🖼️ ' : file.kind === 'pdf' ? '📄 ' : file.kind === 'video' ? '🎬 ' : '📎 ') + file.name
@@ -1090,11 +1233,16 @@ export default function CompanyConversations() {
         p_hora: new Date().toISOString(),
         p_base64: mediaBase64,
         p_nome: senderName,
+        p_quoted: quoting?.id_mensagem || null,
       })
       if (insErr) console.error('send_mensagem_geral:', insErr)
 
-      // Aguarda resposta do n8n (retorna instancia + mensagem + id_mensagem) para gravar no banco
-      fetch('https://n8n.nexladesenvolvimento.com.br/webhook/envioNexla', {
+      // Resposta citando mensagem usa webhook dedicado (precisa do quoted.key na Evolution);
+      // envio normal segue pelo envioNexla. Aguarda o retorno com id_mensagem pra gravar no banco.
+      const webhookUrl = quoting
+        ? 'https://n8n.nexladesenvolvimento.com.br/webhook/respondermensagem'
+        : 'https://n8n.nexladesenvolvimento.com.br/webhook/envioNexla'
+      fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1115,6 +1263,12 @@ export default function CompanyConversations() {
           company: session?.company?.name,
           sender_name: session?.user?.name,
           sender_email: session?.user?.email,
+          ...(quoting ? {
+            quoted_id: quoting.id_mensagem || null,
+            quoted_text: quoting.content || '',
+            quoted_fromMe: quoting.type !== 'cliente',
+            quoted_remoteJid: selected.session_id,
+          } : {}),
         }),
       })
         .then(r => r.text())
@@ -1189,6 +1343,116 @@ export default function CompanyConversations() {
     }
   }
 
+  async function handleTranscribeAudio(msg) {
+    if (transcribingId || msg.transcript) return
+    setTranscribingId(msg.id)
+    try {
+      const res = await fetch('https://n8n.nexladesenvolvimento.com.br/webhook/transcreveraudio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: msg.id, id_mensagem: msg.id_mensagem, base64: msg.base64,
+          instancia: instance, api_instancia: apiInstancia,
+        }),
+      })
+      if (!res.ok) throw new Error('status ' + res.status)
+      const transcript = (await res.text()).trim()
+      if (!transcript) throw new Error('resposta vazia')
+      await supabase.from('mensagens_geral').update({ transcript }).eq('id', msg.id)
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, transcript } : m))
+    } catch (e) {
+      setToast({ message: 'Erro ao transcrever: ' + e.message, color: '#DC2626' })
+      setTimeout(() => setToast(null), 3500)
+    } finally {
+      setTranscribingId(null)
+    }
+  }
+
+  async function handleSummarizePdf(msg) {
+    if (summarizingId || msg.summary) return
+    setSummarizingId(msg.id)
+    try {
+      const res = await fetch('https://n8n.nexladesenvolvimento.com.br/webhook/resumirpdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: msg.id, id_mensagem: msg.id_mensagem, base64: msg.base64,
+          instancia: instance, api_instancia: apiInstancia,
+        }),
+      })
+      if (!res.ok) throw new Error('status ' + res.status)
+      const summary = (await res.text()).trim()
+      if (!summary) throw new Error('resposta vazia')
+      await supabase.from('mensagens_geral').update({ summary }).eq('id', msg.id)
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, summary } : m))
+    } catch (e) {
+      setToast({ message: 'Erro ao resumir: ' + e.message, color: '#DC2626' })
+      setTimeout(() => setToast(null), 3500)
+    } finally {
+      setSummarizingId(null)
+    }
+  }
+
+  async function handleDeleteMessage(msg) {
+    if (deletingMsgId) return
+    setDeletingMsgId(msg.id)
+    try {
+      const { error } = await supabase.from('mensagens_geral')
+        .update({ mensagem: '🚫 Mensagem apagada', base64: null })
+        .eq('id', msg.id)
+      if (error) throw error
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: '🚫 Mensagem apagada', base64: null } : m))
+      fetch('https://n8n.nexladesenvolvimento.com.br/webhook/envioNexlaexcluir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: msg.id, id_mensagem: msg.id_mensagem,
+          session_id: selected?.session_id, phone: selected?.phone,
+          instancia: instance, api_instancia: apiInstancia,
+          company: session?.company?.name,
+          sender_name: session?.user?.name, sender_email: session?.user?.email,
+        }),
+      }).catch(e => console.warn('webhook excluir:', e))
+    } catch (e) {
+      setToast({ message: 'Erro ao apagar: ' + e.message, color: '#DC2626' })
+      setTimeout(() => setToast(null), 3500)
+    } finally {
+      setDeletingMsgId(null)
+    }
+  }
+
+  // Marca uma conversa como não lida manualmente: joga o last_read_at pro passado
+  // (persiste no banco — na próxima carga o contador de não lidos recalcula certo).
+  async function handleMarkUnread(contact) {
+    setContextMenu(null)
+    const farPast = '1970-01-01T00:00:00Z'
+    setReadsMap(prev => ({ ...prev, [contact.session_id]: farPast }))
+    setUnreadCounts(prev => ({ ...prev, [contact.session_id]: prev[contact.session_id] || 1 }))
+    if (session?.user?.email) {
+      await supabase.from('conversation_reads').upsert({
+        instancia: instance,
+        session_id: contact.session_id,
+        user_email: session.user.email,
+        last_read_at: farPast,
+      }, { onConflict: 'instancia,session_id,user_email' })
+    }
+  }
+
+  async function handleToggleAwaitingClient() {
+    if (!selected || togglingAwaiting) return
+    const att = attendancesMap[selected.session_id]
+    if (!att) return
+    setTogglingAwaiting(true)
+    const next = !att.awaiting_client
+    const { error } = await supabase.from('attendances')
+      .update({ awaiting_client: next })
+      .eq('numero', selected.session_id).eq('instancia', instance)
+    setTogglingAwaiting(false)
+    if (!error) {
+      setAttendancesMap(prev => ({ ...prev, [selected.session_id]: { ...prev[selected.session_id], awaiting_client: next } }))
+    }
+  }
+
   async function handleReopen(contact) {
     if (!contact || !instance) return
     await supabase.from('conversations').delete().eq('session_id', contact.session_id).eq('instancia', instance)
@@ -1198,6 +1462,94 @@ export default function CompanyConversations() {
     setTab('recepcao')
     setToast({ message: 'Conversa reaberta', color: '#16A34A' })
     setTimeout(() => setToast(null), 2500)
+  }
+
+  // Carrega motivos de encerramento; semeia os padrão na 1ª vez (linha sentinela
+  // __seeded__ evita ressemear o que a empresa apagou de propósito depois).
+  async function loadReasons() {
+    if (!instance) return
+    const { data } = await supabase.from('conversation_close_reasons')
+      .select('*').eq('instancia', instance).order('created_at', { ascending: true })
+    const rows = (data || []).filter(r => r.value !== '__seeded__')
+    const seeded = (data || []).some(r => r.value === '__seeded__')
+    const withStyle = list => list.map(r => ({ ...r, ...reasonStyle(r.color) }))
+    if (rows.length === 0 && !seeded) {
+      const seedDate = '2020-01-01T00:00:00Z'
+      await supabase.from('conversation_close_reasons').insert(
+        [...DEFAULT_REASONS, { value: '__seeded__', label: '', color: '#000000' }]
+          .map(r => ({ ...r, instancia: instance, created_at: seedDate }))
+      )
+      const { data: fresh } = await supabase.from('conversation_close_reasons')
+        .select('*').eq('instancia', instance).order('created_at', { ascending: true })
+      setReasons(withStyle((fresh || []).filter(r => r.value !== '__seeded__')))
+    } else {
+      setReasons(withStyle(rows))
+    }
+  }
+
+  useEffect(() => { loadReasons() }, [instance])
+
+  function slugifyReason(label) {
+    const noDiacritics = label.toLowerCase().trim().normalize('NFD').split('').filter(ch => {
+      const code = ch.codePointAt(0)
+      return code < 0x0300 || code > 0x036f // remove marcas de acento (combining diacritics)
+    }).join('')
+    return noDiacritics.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || `motivo_${Date.now()}`
+  }
+
+  async function handleAddReason() {
+    const label = newReasonLabel.trim()
+    if (!label || savingReason) return
+    setSavingReason(true)
+    const { error } = await supabase.from('conversation_close_reasons')
+      .insert({ instancia: instance, value: slugifyReason(label), label, color: newReasonColor })
+    setSavingReason(false)
+    if (error) {
+      setToast({ message: 'Erro ao adicionar motivo: ' + error.message, color: '#DC2626' })
+      setTimeout(() => setToast(null), 3500)
+      return
+    }
+    setNewReasonLabel('')
+    setAddingReason(false)
+    loadReasons()
+  }
+
+  function startEditReason(r) {
+    setEditingReasonId(r.id)
+    setEditingReasonLabel(r.label)
+    setEditingReasonColor(r.color || '#6B7280')
+  }
+
+  async function handleSaveReason() {
+    const label = editingReasonLabel.trim()
+    if (!label || savingReason || !editingReasonId) return
+    setSavingReason(true)
+    const { error } = await supabase.from('conversation_close_reasons')
+      .update({ label, color: editingReasonColor })
+      .eq('id', editingReasonId)
+    setSavingReason(false)
+    if (error) {
+      setToast({ message: 'Erro ao salvar motivo: ' + error.message, color: '#DC2626' })
+      setTimeout(() => setToast(null), 3500)
+      return
+    }
+    setEditingReasonId(null)
+    loadReasons()
+  }
+
+  async function handleDeleteReason(r) {
+    if (r.value === 'auto_encerrado') return // reservado ao sistema (auto-encerramento)
+    await supabase.from('conversation_close_reasons').delete().eq('id', r.id)
+    loadReasons()
+  }
+
+  async function handleRestoreDefaultReasons() {
+    const existing = new Set(reasons.map(r => r.value))
+    const missing = DEFAULT_REASONS.filter(r => !existing.has(r.value))
+    if (!missing.length) return
+    await supabase.from('conversation_close_reasons')
+      .insert(missing.map(r => ({ ...r, instancia: instance })))
+    loadReasons()
   }
 
   async function handleClose() {
@@ -1219,8 +1571,8 @@ export default function CompanyConversations() {
     setCloseModal(null)
     setReason('')
     setTab('finalizados')
-    const label = REASONS.find(r => r.value === reason)?.label || reason
-    setToast({ message: `Conversa finalizada — ${label}`, color: REASONS.find(r => r.value === reason)?.color || '#16A34A' })
+    const label = reasons.find(r => r.value === reason)?.label || reason
+    setToast({ message: `Conversa finalizada — ${label}`, color: reasons.find(r => r.value === reason)?.color || '#16A34A' })
     setTimeout(() => setToast(null), 3500)
   }
 
@@ -1320,7 +1672,7 @@ export default function CompanyConversations() {
             const att = attendancesMap[c.session_id]
             const isAssuming = assuming === c.session_id
             const closedReason = closedMap[c.session_id]
-            const rs = closedReason ? REASONS.find(r => r.value === closedReason) : null
+            const rs = closedReason ? reasons.find(r => r.value === closedReason) : null
             const cleanNum = c.phone.replace(/\D/g, '')
             const saved = savedContacts[cleanNum]
             const cliente = clientesMap[cleanNum]
@@ -1387,6 +1739,11 @@ export default function CompanyConversations() {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 20, color: '#16A34A', background: '#F0FDF4', border: '1px solid #BBF7D0', lineHeight: '16px' }}>
                           <Headset size={9} /> {att.attendant_name?.split(' ')[0]}
                         </span>
+                        {att.awaiting_client && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 20, color: '#D97706', background: '#FFFBEB', border: '1px solid #FDE68A', lineHeight: '16px' }}>
+                            <Clock size={9} /> Aguardando paciente
+                          </span>
+                        )}
                       </>
                     )}
                     {tab === 'finalizados' && rs && (
@@ -1477,6 +1834,18 @@ export default function CompanyConversations() {
                   </>
                 )
               })()}
+              <button
+                className="nx-btn-ghost"
+                title="Buscar na conversa"
+                onClick={() => setSearchOpen(v => !v)}
+                style={{
+                  padding: '7px 10px', display: 'flex', alignItems: 'center',
+                  color: searchOpen ? '#2563EB' : undefined,
+                  background: searchOpen ? '#EFF6FF' : undefined,
+                }}
+              >
+                <Search size={14} />
+              </button>
               {!isClosed && (() => {
                 const cleanNum = selected.phone.replace(/\D/g, '')
                 const saved = savedContacts[cleanNum]
@@ -1550,6 +1919,23 @@ export default function CompanyConversations() {
                       const isOwner = !att || isAdmin || att.attendant_email === session?.user?.email
                       if (!isOwner) return null
                       return (
+                        <>
+                          {att && (
+                            <button
+                              className="nx-btn-ghost"
+                              style={{
+                                fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6,
+                                color: att.awaiting_client ? '#D97706' : undefined,
+                                borderColor: att.awaiting_client ? '#FDE68A' : undefined,
+                                background: att.awaiting_client ? '#FFFBEB' : undefined,
+                              }}
+                              title="Marcar que já respondi e estou esperando o cliente"
+                              disabled={togglingAwaiting}
+                              onClick={handleToggleAwaitingClient}
+                            >
+                              <Clock size={14} /> <span className="btn-label">{att.awaiting_client ? 'Aguardando paciente' : 'Aguardando resposta?'}</span>
+                            </button>
+                          )}
                         <button
                           className="nx-btn-ghost"
                           style={{ fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
@@ -1557,6 +1943,7 @@ export default function CompanyConversations() {
                         >
                           <CheckCircle2 size={14} /> <span className="btn-label">Finalizar conversa</span>
                         </button>
+                        </>
                       )
                     })()}
                   </>
@@ -1571,7 +1958,7 @@ export default function CompanyConversations() {
                     anchor="bottom-right"
                   />
                   {(() => {
-                    const rs = REASONS.find(r => r.value === closedMap[selected.session_id])
+                    const rs = reasons.find(r => r.value === closedMap[selected.session_id])
                     return rs ? (
                       <span style={{
                         fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 20,
@@ -1582,6 +1969,61 @@ export default function CompanyConversations() {
                 </>
               )}
             </div>
+
+            {searchOpen && (
+              <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0 }}>
+                <div style={{ padding: '10px 18px', display: 'flex', gap: 8 }}>
+                  <input
+                    className="nx-input"
+                    autoFocus
+                    style={{ flex: 1 }}
+                    placeholder="Buscar mensagens nessa conversa..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Escape' && setSearchOpen(false)}
+                  />
+                  <button className="nx-btn-ghost" onClick={() => setSearchOpen(false)} title="Fechar busca">
+                    <X size={14} />
+                  </button>
+                </div>
+                {searchQuery.trim() && (
+                  <div style={{ maxHeight: 260, overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
+                    {searchLoading && (
+                      <div style={{ padding: '14px 18px', fontSize: 12, color: 'var(--text-muted)' }}>Buscando...</div>
+                    )}
+                    {!searchLoading && searchResults.length === 0 && (
+                      <div style={{ padding: '14px 18px', fontSize: 12, color: 'var(--text-muted)' }}>Nenhum resultado.</div>
+                    )}
+                    {!searchLoading && searchResults.map(r => {
+                      const t = (r.type || '').toLowerCase()
+                      const isCli = t === 'cliente'
+                      const who = isCli
+                        ? (resolveName(selected?.phone) !== selected?.phone ? resolveName(selected?.phone) : 'Cliente')
+                        : (t === 'atendente' ? (r.nome || 'Atendente') : 'IA')
+                      return (
+                        <div
+                          key={r.id}
+                          onClick={() => handleSearchResultClick(r)}
+                          style={{
+                            padding: '9px 18px', cursor: 'pointer', borderBottom: '1px solid #F8FAFC',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: isCli ? '#2563EB' : '#16A34A' }}>{who}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatMsgTime(getTimestamp(r))}</span>
+                          </div>
+                          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {getMessageContent(r)}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Banner: conversa assumida por outro atendente (não-dono e não-admin) */}
             {(() => {
@@ -1738,8 +2180,17 @@ export default function CompanyConversations() {
                 const isLeft       = isCliente
                 const isImage      = isCliente && /^(esta imagem|a imagem|esse documento|este documento|essa imagem|o documento|a foto|essa foto)/i.test(msg.content.trim())
                 const labelColor   = isCliente ? 'var(--text-muted)' : isAtendente ? '#16A34A' : '#2563EB'
+                const quotedMsg = msg.quoted_id_mensagem
+                  ? messages.find(m => m.id_mensagem === msg.quoted_id_mensagem)
+                  : null
                 return (
-                  <div key={msg.id}>
+                  <div key={msg.id}
+                    ref={el => { if (el) msgRefs.current[msg.id] = el }}
+                    style={{
+                      borderRadius: 10, transition: 'background-color 0.4s',
+                      background: highlightId === msg.id ? 'rgba(37,99,235,0.14)' : 'transparent',
+                    }}
+                  >
                     <div className="msg-label" style={{
                       display: 'flex', alignItems: 'center', gap: 4,
                       justifyContent: isLeft ? 'flex-start' : 'flex-end',
@@ -1759,8 +2210,13 @@ export default function CompanyConversations() {
                         const fileLine = fileLineMatch?.[1] || null
                         const extraText = fileLineMatch?.[3]?.trim() || ''
                         const isPlaceholder = !!fileLine
-                        const displayContent = isPlaceholder ? extraText : rawContent
+                        // PDF e imagem nunca mostram a legenda que veio junto — só a mídia
+                        const suppressCaption = media?.type === 'pdf' || media?.type === 'image'
+                        const displayContent = isPlaceholder ? (suppressCaption ? '' : extraText) : rawContent
                         const hasOnlyMedia = media && !displayContent
+                        const isLongText = !isPlaceholder && displayContent.length > TEXT_LIMIT
+                        const isExpanded = expandedMsgIds.has(msg.id)
+                        const shownText = isLongText && !isExpanded ? displayContent.slice(0, TEXT_LIMIT).trimEnd() + '…' : displayContent
                         const bubbleStyle = isAtendente
                           ? hasOnlyMedia
                             ? { background: 'transparent', padding: 0, boxShadow: 'none', border: 'none' }
@@ -1770,10 +2226,65 @@ export default function CompanyConversations() {
                             : {}
                         return (
                           <div className="msg-bubble" style={bubbleStyle}>
+                            {(quotedMsg || msg.quoted_text) && (
+                              <div
+                                onClick={() => quotedMsg && jumpToMessage(quotedMsg.id)}
+                                title={quotedMsg ? 'Ir para a mensagem citada' : undefined}
+                                style={{
+                                  display: 'flex', flexDirection: 'column', gap: 1,
+                                  borderLeft: `3px solid ${isAtendente ? 'rgba(255,255,255,0.6)' : '#2563EB'}`,
+                                  background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F1F5F9',
+                                  borderRadius: 6, padding: '5px 9px', marginBottom: 6,
+                                  cursor: quotedMsg ? 'pointer' : 'default',
+                                  maxWidth: 260,
+                                }}
+                              >
+                                <span style={{ fontSize: 11, fontWeight: 700, color: isAtendente ? '#fff' : '#2563EB' }}>
+                                  {quotedMsg
+                                    ? (quotedMsg.type === 'cliente' ? (resolveName(selected?.phone) !== selected?.phone ? resolveName(selected?.phone) : 'Cliente') : quotedMsg.nome || 'Atendente')
+                                    : 'Mensagem citada'}
+                                </span>
+                                <span style={{
+                                  fontSize: 12, color: isAtendente ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)',
+                                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                }}>
+                                  {(quotedMsg?.content || msg.quoted_text || '').slice(0, 120) || '(mídia)'}
+                                </span>
+                              </div>
+                            )}
                             {media && (() => {
                               const src = `data:${media.mime};base64,${msg.base64}`
                               if (media.type === 'audio') return (
-                                <AudioPlayer src={src} style={{ marginBottom: hasOnlyMedia ? 0 : 6 }} />
+                                <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
+                                  <AudioPlayer src={src} />
+                                  {msg.transcript ? (
+                                    <div style={{
+                                      marginTop: 6, fontSize: 12.5, fontStyle: 'italic',
+                                      color: isAtendente ? 'rgba(255,255,255,0.9)' : 'var(--text-secondary)',
+                                      whiteSpace: 'pre-wrap',
+                                    }}>
+                                      "{msg.transcript}"
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleTranscribeAudio(msg)}
+                                      disabled={transcribingId === msg.id}
+                                      style={{
+                                        marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
+                                        fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                                        cursor: transcribingId === msg.id ? 'default' : 'pointer',
+                                        border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
+                                        background: isAtendente ? 'rgba(255,255,255,0.12)' : 'transparent',
+                                        color: isAtendente ? '#fff' : 'var(--text-secondary)',
+                                        opacity: transcribingId === msg.id ? 0.75 : 1,
+                                      }}
+                                    >
+                                      {transcribingId === msg.id ? (
+                                        <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Transcrevendo...</>
+                                      ) : 'Transcrever'}
+                                    </button>
+                                  )}
+                                </div>
                               )
                               if (media.type === 'image') return (
                                 <img src={src} alt="mídia" style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', marginBottom: hasOnlyMedia ? 0 : 6, cursor: 'zoom-in' }}
@@ -1787,25 +2298,54 @@ export default function CompanyConversations() {
                               if (media.type === 'pdf') {
                                 const fileName = (fileLine || '').replace(/^📄\s*/, '').trim() || 'documento.pdf'
                                 return (
-                                  <a href={src} download={fileName} target="_blank" rel="noreferrer"
-                                    style={{
-                                      display: 'inline-flex', alignItems: 'center', gap: 10,
-                                      background: '#FEF2F2', border: '1px solid #FECACA',
-                                      borderRadius: 8, padding: '10px 14px', textDecoration: 'none',
-                                      minWidth: 220, marginBottom: hasOnlyMedia ? 0 : 6,
-                                    }}>
-                                    <div style={{
-                                      width: 36, height: 36, borderRadius: 6, background: '#FEE2E2',
-                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                      color: '#DC2626', fontWeight: 700, fontSize: 11, flexShrink: 0,
-                                    }}>PDF</div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                      <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {fileName}
+                                  <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
+                                    <a href={src} download={fileName} target="_blank" rel="noreferrer"
+                                      style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 10,
+                                        background: '#FEF2F2', border: '1px solid #FECACA',
+                                        borderRadius: 8, padding: '10px 14px', textDecoration: 'none',
+                                        minWidth: 220,
+                                      }}>
+                                      <div style={{
+                                        width: 36, height: 36, borderRadius: 6, background: '#FEE2E2',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        color: '#DC2626', fontWeight: 700, fontSize: 11, flexShrink: 0,
+                                      }}>PDF</div>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          {fileName}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: '#6B7280' }}>Clique para baixar/abrir</div>
                                       </div>
-                                      <div style={{ fontSize: 11, color: '#6B7280' }}>Clique para baixar/abrir</div>
-                                    </div>
-                                  </a>
+                                    </a>
+                                    {msg.summary ? (
+                                      <div style={{
+                                        marginTop: 6, fontSize: 12.5, fontStyle: 'italic',
+                                        color: isAtendente ? 'rgba(255,255,255,0.9)' : 'var(--text-secondary)',
+                                        whiteSpace: 'pre-wrap',
+                                      }}>
+                                        {msg.summary}
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleSummarizePdf(msg)}
+                                        disabled={summarizingId === msg.id}
+                                        style={{
+                                          marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
+                                          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                                          cursor: summarizingId === msg.id ? 'default' : 'pointer',
+                                          border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
+                                          background: isAtendente ? 'rgba(255,255,255,0.12)' : 'transparent',
+                                          color: isAtendente ? '#fff' : 'var(--text-secondary)',
+                                          opacity: summarizingId === msg.id ? 0.75 : 1,
+                                        }}
+                                      >
+                                        {summarizingId === msg.id ? (
+                                          <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resumindo...</>
+                                        ) : 'Resumir'}
+                                      </button>
+                                    )}
+                                  </div>
                                 )
                               }
                               return null
@@ -1883,19 +2423,58 @@ export default function CompanyConversations() {
                                 </div>
                               </div>
                             ) : displayContent ? (
-                              <span style={{ whiteSpace: 'pre-wrap' }}>
-                                {renderTextWithLinks(displayContent, {
-                                  color: isAtendente ? 'rgba(255,255,255,0.9)' : '#2563EB',
-                                  textDecoration: 'underline',
-                                  wordBreak: 'break-all',
-                                })}
-                              </span>
+                              <>
+                                <span style={{
+                                  whiteSpace: 'pre-wrap',
+                                  ...(msg.content === '🚫 Mensagem apagada' ? { fontStyle: 'italic', opacity: 0.7 } : {}),
+                                }}>
+                                  {renderTextWithLinks(shownText, {
+                                    color: isAtendente ? 'rgba(255,255,255,0.9)' : '#2563EB',
+                                    textDecoration: 'underline',
+                                    wordBreak: 'break-all',
+                                  })}
+                                </span>
+                                {isLongText && (
+                                  <button
+                                    onClick={() => setExpandedMsgIds(prev => {
+                                      const next = new Set(prev)
+                                      isExpanded ? next.delete(msg.id) : next.add(msg.id)
+                                      return next
+                                    })}
+                                    style={{
+                                      display: 'block', marginTop: 4, background: 'none', border: 'none',
+                                      padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                                      color: isAtendente ? 'rgba(255,255,255,0.85)' : '#2563EB',
+                                      textDecoration: 'underline',
+                                    }}
+                                  >
+                                    {isExpanded ? 'Ver menos' : 'Ver mais'}
+                                  </button>
+                                )}
+                              </>
                             ) : null}
                           </div>
                         )
                       })()}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: isLeft ? 'flex-start' : 'flex-end', gap: 5 }}>
+                      {!isClosed && canRespond(selected) && editingMsgId !== msg.id && (
+                        <button
+                          onClick={() => setReplyTo(msg)}
+                          title="Responder citando"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 18, height: 18, borderRadius: 4, border: 'none',
+                            background: 'transparent', cursor: 'pointer',
+                            color: 'var(--text-muted)', opacity: 0.55, padding: 0,
+                            transition: 'opacity 0.15s',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                          onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}
+                        >
+                          <Reply size={11} />
+                        </button>
+                      )}
                       {isAtendente && !msg.base64 && editingMsgId !== msg.id && (
                         <button
                           onClick={() => { setEditingMsgId(msg.id); setEditingText(msg.content || '') }}
@@ -1913,6 +2492,24 @@ export default function CompanyConversations() {
                           <Pencil size={10} />
                         </button>
                       )}
+                      {isAtendente && editingMsgId !== msg.id && msg.content !== '🚫 Mensagem apagada' && (
+                        <button
+                          onClick={() => handleDeleteMessage(msg)}
+                          disabled={deletingMsgId === msg.id}
+                          title="Apagar mensagem"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 18, height: 18, borderRadius: 4, border: 'none',
+                            background: 'transparent', cursor: deletingMsgId === msg.id ? 'default' : 'pointer',
+                            color: 'var(--text-muted)', opacity: 0.55, padding: 0,
+                            transition: 'opacity 0.15s',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                          onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      )}
                       {msg.ts && (
                         <div className="msg-time" style={{ textAlign: isLeft ? 'left' : 'right' }}>
                           {formatMsgTime(msg.ts)}
@@ -1927,6 +2524,26 @@ export default function CompanyConversations() {
 
             {!isClosed && (
               <div style={{ padding: '12px 18px', borderTop: '0.5px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0 }}>
+                {replyTo && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    background: '#F1F5F9', border: '1px solid var(--border)', borderLeft: '3px solid #2563EB',
+                    borderRadius: 8, padding: '6px 12px', marginBottom: 8,
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#2563EB' }}>
+                        Respondendo a {replyTo.type === 'cliente' ? (resolveName(selected?.phone) !== selected?.phone ? resolveName(selected?.phone) : 'Cliente') : replyTo.nome || 'Atendente'}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {replyTo.content || '(mídia)'}
+                      </div>
+                    </div>
+                    <button onClick={() => setReplyTo(null)} title="Cancelar resposta"
+                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4, flexShrink: 0 }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
                 {attachedFile && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 10,
@@ -2175,6 +2792,20 @@ export default function CompanyConversations() {
               </button>
             )
           })()}
+          <button
+            onClick={() => handleMarkUnread(contextMenu.contact)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              padding: '8px 12px', border: 'none', background: 'transparent',
+              fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer',
+              borderRadius: 6, textAlign: 'left',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <MailOpen size={13} />
+            Marcar como não lida
+          </button>
         </div>
       , document.body)}
 
@@ -2324,12 +2955,17 @@ export default function CompanyConversations() {
                   {closeModal.phone} — qual foi o resultado?
                 </div>
               </div>
-              <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
-                onClick={() => setCloseModal(null)}><X size={16} /></button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
+                  title="Gerenciar motivos"
+                  onClick={() => setManageReasonsOpen(true)}><Pencil size={14} /></button>
+                <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}
+                  onClick={() => setCloseModal(null)}><X size={16} /></button>
+              </div>
             </div>
 
             <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {MANUAL_REASONS.map(r => (
+              {reasons.filter(r => r.value !== 'auto_encerrado').map(r => (
                 <label key={r.value} style={{
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '12px 16px', borderRadius: 8, cursor: 'pointer',
@@ -2355,6 +2991,71 @@ export default function CompanyConversations() {
               <button className="nx-btn-primary" style={{ flex: 1, justifyContent: 'center', opacity: reason ? 1 : 0.5 }}
                 onClick={handleClose} disabled={!reason || closing}>
                 <CheckCircle2 size={13} /> {closing ? 'Finalizando...' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      , document.body)}
+
+      {manageReasonsOpen && createPortal(
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 10001, backdropFilter: 'blur(4px)', padding: '1.5rem',
+        }} onClick={() => setManageReasonsOpen(false)}>
+          <div className="nx-card" style={{ width: '100%', maxWidth: 420, maxHeight: 'calc(100vh - 3rem)', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>Motivos de encerramento</div>
+              <button style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                onClick={() => { setManageReasonsOpen(false); setEditingReasonId(null); setAddingReason(false) }}><X size={16} /></button>
+            </div>
+            <div style={{ padding: '1rem 1.5rem', flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {reasons.filter(r => r.value !== 'auto_encerrado').map(r => (
+                <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px' }}>
+                  {editingReasonId === r.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="color" value={editingReasonColor} onChange={e => setEditingReasonColor(e.target.value)}
+                        style={{ width: 30, height: 30, padding: 0, border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }} />
+                      <input className="nx-input" style={{ flex: 1 }} autoFocus value={editingReasonLabel}
+                        onChange={e => setEditingReasonLabel(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSaveReason()} />
+                      <button className="nx-btn-ghost" style={{ padding: '6px 10px' }} onClick={() => setEditingReasonId(null)}>Cancelar</button>
+                      <button className="nx-btn-primary" style={{ padding: '6px 10px' }} disabled={!editingReasonLabel.trim() || savingReason} onClick={handleSaveReason}>Salvar</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 12, height: 12, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
+                      <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{r.label}</div>
+                      <button onClick={() => startEditReason(r)} title="Editar" style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}>
+                        <Pencil size={13} />
+                      </button>
+                      <button onClick={() => handleDeleteReason(r)} title="Excluir" style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', padding: 4 }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {addingReason ? (
+                <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="color" value={newReasonColor} onChange={e => setNewReasonColor(e.target.value)}
+                    style={{ width: 30, height: 30, padding: 0, border: 'none', borderRadius: 6, cursor: 'pointer', flexShrink: 0 }} />
+                  <input className="nx-input" style={{ flex: 1 }} autoFocus placeholder="Nome do motivo"
+                    value={newReasonLabel} onChange={e => setNewReasonLabel(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleAddReason()} />
+                  <button className="nx-btn-ghost" style={{ padding: '6px 10px' }} onClick={() => { setAddingReason(false); setNewReasonLabel('') }}>Cancelar</button>
+                  <button className="nx-btn-primary" style={{ padding: '6px 10px' }} disabled={!newReasonLabel.trim() || savingReason} onClick={handleAddReason}>Adicionar</button>
+                </div>
+              ) : (
+                <button className="nx-btn-ghost" style={{ justifyContent: 'center' }} onClick={() => setAddingReason(true)}>
+                  + Novo motivo
+                </button>
+              )}
+            </div>
+            <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+              <button className="nx-btn-ghost" style={{ width: '100%', justifyContent: 'center', fontSize: 12 }} onClick={handleRestoreDefaultReasons}>
+                Restaurar padrões
               </button>
             </div>
           </div>
