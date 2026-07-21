@@ -1360,7 +1360,11 @@ export default function CompanyConversations() {
     setTranscribingId(msg.id)
     await new Promise(r => setTimeout(r, 4000))
     const transcript = FAKE_TRANSCRIPTS[msg.id % FAKE_TRANSCRIPTS.length]
-    await supabase.from('mensagens_geral').update({ transcript }).eq('id', msg.id)
+    const { error } = await supabase.from('mensagens_geral').update({ transcript }).eq('id', msg.id)
+    if (error) {
+      setToast({ message: 'Não salvou no banco: ' + error.message, color: '#DC2626' })
+      setTimeout(() => setToast(null), 5000)
+    }
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, transcript } : m))
     setTranscribingId(null)
   }
@@ -1379,7 +1383,11 @@ export default function CompanyConversations() {
     setSummarizingId(msg.id)
     await new Promise(r => setTimeout(r, 4000))
     const summary = FAKE_SUMMARIES[msg.id % FAKE_SUMMARIES.length]
-    await supabase.from('mensagens_geral').update({ summary }).eq('id', msg.id)
+    const { error } = await supabase.from('mensagens_geral').update({ summary }).eq('id', msg.id)
+    if (error) {
+      setToast({ message: 'Não salvou no banco: ' + error.message, color: '#DC2626' })
+      setTimeout(() => setToast(null), 5000)
+    }
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, summary } : m))
     setSummarizingId(null)
   }
