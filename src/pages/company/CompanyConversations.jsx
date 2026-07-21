@@ -237,6 +237,7 @@ export default function CompanyConversations() {
   const [expandedMsgIds, setExpandedMsgIds] = useState(() => new Set())
   const [transcribingId, setTranscribingId] = useState(null)
   const [summarizingId, setSummarizingId] = useState(null)
+  const [hiddenResultIds, setHiddenResultIds] = useState(() => new Set())
   const [showEmoji, setShowEmoji]         = useState(false)
   const emojiPickerRef                    = useRef(null)
   const [readsMap, setReadsMap]           = useState({}) // session_id → last_read_at ISO
@@ -1364,6 +1365,15 @@ export default function CompanyConversations() {
     setTranscribingId(null)
   }
 
+  function toggleResultVisible(msgId) {
+    setHiddenResultIds(prev => {
+      const next = new Set(prev)
+      if (next.has(msgId)) next.delete(msgId)
+      else next.add(msgId)
+      return next
+    })
+  }
+
   async function handleSummarizePdf(msg) {
     if (summarizingId || msg.summary) return
     setSummarizingId(msg.id)
@@ -2240,18 +2250,27 @@ export default function CompanyConversations() {
                               if (media.type === 'audio') return (
                                 <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
                                   <AudioPlayer src={src} />
-                                  {msg.transcript ? (
+                                  {msg.transcript && !hiddenResultIds.has(msg.id) ? (
                                     <div style={{
                                       marginTop: 6, borderRadius: 8, padding: '8px 10px',
                                       background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
                                       border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
                                     }}>
-                                      <div style={{
-                                        display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
-                                        fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
-                                        color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
-                                      }}>
-                                        <Sparkles size={10} /> Transcrição
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
+                                        <span style={{
+                                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                                          fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+                                          color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+                                        }}>
+                                          <Sparkles size={10} /> Transcrição
+                                        </span>
+                                        <button onClick={() => toggleResultVisible(msg.id)} title="Ocultar"
+                                          style={{
+                                            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                                            display: 'inline-flex', color: isAtendente ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
+                                          }}>
+                                          <X size={12} />
+                                        </button>
                                       </div>
                                       <div style={{
                                         fontSize: 12.5, whiteSpace: 'pre-wrap',
@@ -2262,7 +2281,7 @@ export default function CompanyConversations() {
                                     </div>
                                   ) : (
                                     <button
-                                      onClick={() => handleTranscribeAudio(msg)}
+                                      onClick={() => msg.transcript ? toggleResultVisible(msg.id) : handleTranscribeAudio(msg)}
                                       disabled={transcribingId === msg.id}
                                       style={{
                                         marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -2276,7 +2295,7 @@ export default function CompanyConversations() {
                                     >
                                       {transcribingId === msg.id ? (
                                         <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Transcrevendo...</>
-                                      ) : 'Transcrever'}
+                                      ) : (<><Sparkles size={11} /> {msg.transcript ? 'Ver transcrição' : 'Transcrever'}</>)}
                                     </button>
                                   )}
                                 </div>
@@ -2285,18 +2304,27 @@ export default function CompanyConversations() {
                                 <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
                                   <img src={src} alt="mídia" style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', cursor: 'zoom-in' }}
                                     onClick={() => setLightbox(src)} />
-                                  {msg.summary ? (
+                                  {msg.summary && !hiddenResultIds.has(msg.id) ? (
                                     <div style={{
                                       marginTop: 6, borderRadius: 8, padding: '8px 10px',
                                       background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
                                       border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
                                     }}>
-                                      <div style={{
-                                        display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
-                                        fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
-                                        color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
-                                      }}>
-                                        <Sparkles size={10} /> Resumo
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
+                                        <span style={{
+                                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                                          fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+                                          color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+                                        }}>
+                                          <Sparkles size={10} /> Resumo
+                                        </span>
+                                        <button onClick={() => toggleResultVisible(msg.id)} title="Ocultar"
+                                          style={{
+                                            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                                            display: 'inline-flex', color: isAtendente ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
+                                          }}>
+                                          <X size={12} />
+                                        </button>
                                       </div>
                                       <div style={{
                                         fontSize: 12.5, whiteSpace: 'pre-wrap',
@@ -2307,7 +2335,7 @@ export default function CompanyConversations() {
                                     </div>
                                   ) : (
                                     <button
-                                      onClick={() => handleSummarizePdf(msg)}
+                                      onClick={() => msg.summary ? toggleResultVisible(msg.id) : handleSummarizePdf(msg)}
                                       disabled={summarizingId === msg.id}
                                       style={{
                                         marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -2321,7 +2349,7 @@ export default function CompanyConversations() {
                                     >
                                       {summarizingId === msg.id ? (
                                         <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resumindo...</>
-                                      ) : (<><Sparkles size={11} /> Resumir</>)}
+                                      ) : (<><Sparkles size={11} /> {msg.summary ? 'Ver resumo' : 'Resumir'}</>)}
                                     </button>
                                   )}
                                 </div>
@@ -2354,18 +2382,27 @@ export default function CompanyConversations() {
                                         <div style={{ fontSize: 11, color: '#6B7280' }}>Clique para baixar/abrir</div>
                                       </div>
                                     </a>
-                                    {msg.summary ? (
+                                    {msg.summary && !hiddenResultIds.has(msg.id) ? (
                                       <div style={{
                                         marginTop: 6, borderRadius: 8, padding: '8px 10px',
                                         background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
                                         border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
                                       }}>
-                                        <div style={{
-                                          display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
-                                          fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
-                                          color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
-                                        }}>
-                                          <Sparkles size={10} /> Resumo
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
+                                          <span style={{
+                                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                                            fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+                                            color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+                                          }}>
+                                            <Sparkles size={10} /> Resumo
+                                          </span>
+                                          <button onClick={() => toggleResultVisible(msg.id)} title="Ocultar"
+                                            style={{
+                                              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                                              display: 'inline-flex', color: isAtendente ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
+                                            }}>
+                                            <X size={12} />
+                                          </button>
                                         </div>
                                         <div style={{
                                           fontSize: 12.5, whiteSpace: 'pre-wrap',
@@ -2376,7 +2413,7 @@ export default function CompanyConversations() {
                                       </div>
                                     ) : (
                                       <button
-                                        onClick={() => handleSummarizePdf(msg)}
+                                        onClick={() => msg.summary ? toggleResultVisible(msg.id) : handleSummarizePdf(msg)}
                                         disabled={summarizingId === msg.id}
                                         style={{
                                           marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -2390,7 +2427,7 @@ export default function CompanyConversations() {
                                       >
                                         {summarizingId === msg.id ? (
                                           <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resumindo...</>
-                                        ) : 'Resumir'}
+                                        ) : (<><Sparkles size={11} /> {msg.summary ? 'Ver resumo' : 'Resumir'}</>)}
                                       </button>
                                     )}
                                   </div>
