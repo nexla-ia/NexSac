@@ -1,0 +1,637 @@
+{
+  "info": {
+    "name": "CliniSac — API de Integração",
+    "description": "Coleção para integração de IA (n8n, Make, scripts próprios). Todos os requests são POST /rest/v1/rpc/{function} com body JSON — nenhum parâmetro fica exposto na URL. Pra ativar, rodar supabase/migrations/20260430_api_rpc.sql.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "Authorization", "type": "string" },
+      { "key": "value", "value": "Bearer {{anon_key}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "base_url",      "value": "https://pllvpbzskmargpdpvumg.supabase.co", "type": "string" },
+    { "key": "anon_key",      "value": "COLE_SUA_ANON_KEY_AQUI", "type": "string" },
+    { "key": "instancia",     "value": "clinicaolhos", "type": "string" },
+    { "key": "evolution_url", "value": "https://evolutionapi.nexladesenvolvimento.com.br", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Pacientes",
+      "item": [
+        {
+          "name": "Listar pacientes",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_search\": null,\n  \"p_limit\": 100,\n  \"p_offset\": 0\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_pacientes_list",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_pacientes_list"]
+            }
+          }
+        },
+        {
+          "name": "Buscar pacientes (search)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_search\": \"maria\",\n  \"p_limit\": 20\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_pacientes_list",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_pacientes_list"]
+            }
+          }
+        },
+        {
+          "name": "Buscar paciente por telefone",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_numero\": \"5511987654321@s.whatsapp.net\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_paciente_by_phone",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_paciente_by_phone"]
+            }
+          }
+        },
+        {
+          "name": "Criar paciente",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_data\": {\n    \"instancia\": \"{{instancia}}\",\n    \"nome\": \"Maria Silva\",\n    \"numero\": \"5511987654321@s.whatsapp.net\",\n    \"birth_date\": \"1985-03-15\",\n    \"gender\": \"feminino\",\n    \"email\": \"maria@email.com\",\n    \"insurance_plan_id\": null,\n    \"insurance_card\": null,\n    \"allergies\": \"Penicilina\",\n    \"chronic_conditions\": null,\n    \"medications\": null,\n    \"referral_source\": \"Instagram\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_paciente_create",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_paciente_create"]
+            }
+          }
+        },
+        {
+          "name": "Atualizar paciente",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_id\": \"PACIENTE_UUID\",\n  \"p_data\": {\n    \"allergies\": \"Penicilina, dipirona\",\n    \"chronic_conditions\": \"Hipertensão\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_paciente_update",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_paciente_update"]
+            }
+          }
+        },
+        {
+          "name": "Deletar paciente",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_id\": \"PACIENTE_UUID\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_paciente_delete",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_paciente_delete"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mensagens",
+      "item": [
+        {
+          "name": "Últimas mensagens do paciente",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_numero\": \"5511987654321@s.whatsapp.net\",\n  \"p_limit\": 20,\n  \"p_only_client\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_messages_by_phone",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_messages_by_phone"]
+            }
+          }
+        },
+        {
+          "name": "Primeiras mensagens (só cliente)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_numero\": \"5511987654321@s.whatsapp.net\",\n  \"p_limit\": 5,\n  \"p_only_client\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_messages_by_phone",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_messages_by_phone"]
+            }
+          }
+        },
+        {
+          "name": "Inserir mensagem (IA respondendo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_data\": {\n    \"instancia\": \"{{instancia}}\",\n    \"numero\": \"5511987654321@s.whatsapp.net\",\n    \"mensagem\": \"Olá Maria! Posso te ajudar a agendar a consulta. Que dia funciona melhor?\",\n    \"type\": \"ia\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_message_create",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_message_create"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conversas / Tickets",
+      "item": [
+        {
+          "name": "Encerrar conversa",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_session_id\": \"5511987654321@s.whatsapp.net\",\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_reason\": \"agendado\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_conversation_close",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_conversation_close"]
+            }
+          }
+        },
+        {
+          "name": "Status da conversa",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_session_id\": \"5511987654321@s.whatsapp.net\",\n  \"p_instancia\": \"{{instancia}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_conversation_status",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_conversation_status"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catálogo Clínico",
+      "item": [
+        {
+          "name": "Listar profissionais ativos",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_only_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_professionals_list",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_professionals_list"]
+            }
+          }
+        },
+        {
+          "name": "Listar procedimentos",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_only_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_procedures_list",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_procedures_list"]
+            }
+          }
+        },
+        {
+          "name": "Listar convênios",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_only_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_insurance_plans_list",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_insurance_plans_list"]
+            }
+          }
+        },
+        {
+          "name": "Preço procedimento × convênio",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_procedure_id\": \"PROCEDURE_UUID\",\n  \"p_insurance_plan_id\": \"INSURANCE_PLAN_UUID\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_procedure_price",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_procedure_price"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agenda",
+      "item": [
+        {
+          "name": "Listar agendas",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_agendas_list",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_agendas_list"]
+            }
+          }
+        },
+        {
+          "name": "Agendamentos do dia",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_date\": \"2026-04-30\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_appointments_by_date",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_appointments_by_date"]
+            }
+          }
+        },
+        {
+          "name": "Agendamentos do paciente",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_phone\": \"5511987654321@s.whatsapp.net\",\n  \"p_limit\": 10\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_appointments_by_phone",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_appointments_by_phone"]
+            }
+          }
+        },
+        {
+          "name": "Slots ocupados (profissional na semana)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\",\n  \"p_professional_id\": \"PROFESSIONAL_UUID\",\n  \"p_from\": \"2026-04-29T00:00:00Z\",\n  \"p_to\":   \"2026-05-06T00:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_appointments_busy_slots",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_appointments_busy_slots"]
+            }
+          }
+        },
+        {
+          "name": "Criar agendamento",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_data\": {\n    \"instancia\": \"{{instancia}}\",\n    \"agenda_id\": \"AGENDA_UUID\",\n    \"professional_id\": \"PROFESSIONAL_UUID\",\n    \"procedure_id\": \"PROCEDURE_UUID\",\n    \"insurance_plan_id\": null,\n    \"contact_nome\": \"Maria Silva\",\n    \"contact_numero\": \"5511987654321@s.whatsapp.net\",\n    \"starts_at\": \"2026-05-02T14:00:00Z\",\n    \"duration_minutes\": 30,\n    \"status\": \"agendado\",\n    \"payment_status\": \"pendente\",\n    \"price\": 180.00,\n    \"notes\": \"Primeira consulta\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_appointment_create",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_appointment_create"]
+            }
+          }
+        },
+        {
+          "name": "Atualizar status (confirmar / concluir / cancelar)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_id\": \"APPOINTMENT_UUID\",\n  \"p_status\": \"concluido\",\n  \"p_payment_status\": \"pago\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_appointment_update_status",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_appointment_update_status"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alertas",
+      "item": [
+        {
+          "name": "Criar alerta (IA pediu ajuda)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_data\": {\n    \"instancia\": \"{{instancia}}\",\n    \"numero\": \"5511987654321@s.whatsapp.net\",\n    \"mensagem\": \"Paciente perguntou se Bradesco cobre cirurgia refrativa. Não tenho info — preciso de atendente humano.\",\n    \"resolved\": false\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_alert_create",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_alert_create"]
+            }
+          }
+        },
+        {
+          "name": "Listar alertas pendentes",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_alerts_pending",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_alerts_pending"]
+            }
+          }
+        },
+        {
+          "name": "Marcar alerta resolvido",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_id\": \"ALERT_UUID\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_alert_resolve",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_alert_resolve"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Atividades / Kanban",
+      "item": [
+        {
+          "name": "Listar colunas",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_kanban_columns",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_kanban_columns"]
+            }
+          }
+        },
+        {
+          "name": "Listar cards",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_instancia\": \"{{instancia}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_kanban_cards",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_kanban_cards"]
+            }
+          }
+        },
+        {
+          "name": "Criar card (follow-up)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{anon_key}}" },
+              { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_data\": {\n    \"instancia\": \"{{instancia}}\",\n    \"column_id\": \"COLUMN_UUID\",\n    \"title\": \"Confirmar consulta de Maria amanhã 14h\",\n    \"description\": \"Paciente não respondeu confirmação automática.\",\n    \"priority\": \"alta\",\n    \"due_date\": \"2026-05-02\",\n    \"position\": 0\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rest/v1/rpc/api_kanban_card_create",
+              "host": ["{{base_url}}"],
+              "path": ["rest", "v1", "rpc", "api_kanban_card_create"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Evolution API (envio de WhatsApp)",
+      "description": "Envio efetivo de mensagens via Evolution API. NÃO faz parte da API CliniSac — exposto aqui pra completude do fluxo.",
+      "item": [
+        {
+          "name": "Status da instância",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "apikey", "value": "{{api_instancia}}" }
+            ],
+            "url": {
+              "raw": "{{evolution_url}}/instance/connectionState/{{instancia}}",
+              "host": ["{{evolution_url}}"],
+              "path": ["instance", "connectionState", "{{instancia}}"]
+            }
+          }
+        },
+        {
+          "name": "Enviar texto",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{api_instancia}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": \"5511987654321\",\n  \"text\": \"Olá Maria! Sua consulta amanhã às 14h está confirmada.\"\n}"
+            },
+            "url": {
+              "raw": "{{evolution_url}}/message/sendText/{{instancia}}",
+              "host": ["{{evolution_url}}"],
+              "path": ["message", "sendText", "{{instancia}}"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

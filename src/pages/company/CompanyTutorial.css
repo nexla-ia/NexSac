@@ -1,0 +1,672 @@
+/* ─── Tutorial — Manual editorial 'diário de bordo' ─────────────────────── */
+
+.tut-root {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background: #FAF8FF;
+  color: #0F0E1B;
+  min-height: 100%;
+  padding-bottom: 60px;
+}
+
+/* ── Banner onboarding (no topo, antes do hero) ──────────────────────────── */
+.tut-onboard-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #1E1B3A 0%, #2D1B4E 100%);
+  color: #fff;
+  padding: 12px 22px;
+  position: relative;
+}
+.tut-onboard-banner::before {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201, 160, 116, 0.5), transparent);
+}
+.tut-onboard-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #C9A074 0%, #B8895C 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.tut-onboard-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.tut-onboard-text strong {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.tut-onboard-text span {
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 13px;
+  color: rgba(232, 201, 164, 0.85);
+}
+.tut-onboard-skip {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.tut-onboard-skip:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* ── HERO ───────────────────────────────────────────────────────────────── */
+.tut-hero {
+  position: relative;
+  padding: 60px 32px 80px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 600px 300px at 80% 30%, rgba(168, 139, 250, 0.30), transparent 70%),
+    radial-gradient(ellipse 500px 400px at 15% 70%, rgba(252, 211, 77, 0.25), transparent 70%),
+    radial-gradient(ellipse 400px 300px at 50% 50%, rgba(74, 222, 128, 0.18), transparent 70%),
+    #F5F3FF;
+  border-bottom: 1px solid rgba(15, 14, 27, 0.06);
+}
+.tut-hero-bg {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(15, 14, 27, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 14, 27, 0.025) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+.tut-hero-content {
+  position: relative;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Progress ring no canto superior direito do hero ─────────────────────── */
+.tut-hero-progress-fab {
+  position: absolute;
+  top: 50px;
+  right: 40px;
+  width: 130px;
+  height: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+.tut-hero-progress-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 8px 22px rgba(124, 58, 237, 0.18));
+}
+.tut-hero-progress-text {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: 'Bricolage Grotesque', sans-serif;
+}
+.tut-hero-progress-num {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  background: linear-gradient(110deg, #7C3AED, #DB2777, #FB923C);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  line-height: 1;
+}
+.tut-hero-progress-divider {
+  font-size: 10px;
+  color: #6B6A85;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.tut-hero-progress-total {
+  font-size: 14px;
+  color: #0F0E1B;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-top: 1px;
+}
+@media (max-width: 980px) {
+  .tut-hero-progress-fab { display: none; }
+}
+
+.tut-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: white;
+  color: #0F0E1B;
+  padding: 6px 14px;
+  border-radius: 999px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(15, 14, 27, 0.08);
+  box-shadow: 0 2px 6px -3px rgba(15, 14, 27, 0.1);
+}
+.tut-hero-eyebrow svg { color: #C9A074; }
+
+.tut-hero-title {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: clamp(42px, 5vw, 72px);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+  margin: 0 0 20px;
+  color: #0F0E1B;
+}
+.tut-hero-title em {
+  font-style: normal;
+  background: linear-gradient(110deg, #7C3AED 0%, #DB2777 45%, #FB923C 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 800;
+  display: inline-block;
+}
+
+.tut-hero-sub {
+  font-size: 16px;
+  color: #2D2B45;
+  max-width: 620px;
+  line-height: 1.6;
+  margin: 0 0 28px;
+  font-weight: 500;
+}
+
+.tut-hero-stats {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  background: white;
+  border: 1px solid rgba(15, 14, 27, 0.08);
+  border-radius: 14px;
+  padding: 4px;
+  box-shadow: 0 4px 16px -8px rgba(15, 14, 27, 0.1);
+}
+.tut-hero-stat {
+  padding: 10px 22px;
+  border-right: 1px solid rgba(15, 14, 27, 0.06);
+  text-align: center;
+  min-width: 110px;
+}
+.tut-hero-stat:last-child { border-right: none; }
+.tut-hero-stat-value {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #0F0E1B;
+  line-height: 1;
+}
+.tut-hero-stat-label {
+  font-size: 10px;
+  color: #6B6A85;
+  margin-top: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tut-finish-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+  padding: 14px 24px;
+  background: linear-gradient(135deg, #16A34A 0%, #15803D 100%);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(22, 163, 74, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.tut-finish-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(22, 163, 74, 0.45); }
+
+.tut-trophy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 22px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #FBBF24 0%, #F59E0B 100%);
+  color: #fff;
+  border-radius: 999px;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.35);
+}
+
+/* ── LAYOUT MASTER-DETAIL ───────────────────────────────────────────────── */
+.tut-shell {
+  max-width: 1200px;
+  margin: -40px auto 0;
+  padding: 0 32px;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 22px;
+  align-items: flex-start;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Sidebar de capítulos ───────────────────────────────────────────────── */
+.tut-nav {
+  background: white;
+  border: 1px solid rgba(15, 14, 27, 0.08);
+  border-radius: 18px;
+  padding: 12px;
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  box-shadow: 0 8px 28px -16px rgba(15, 14, 27, 0.18);
+}
+.tut-nav-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: #6B6A85;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 10px 12px 12px;
+}
+
+.tut-nav-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  margin-bottom: 4px;
+  transition: background 0.12s, border-color 0.12s;
+}
+.tut-nav-item:hover { background: #FAF6FF; }
+.tut-nav-item.active { background: white; border-color: rgba(15, 14, 27, 0.12); box-shadow: 0 4px 12px -4px rgba(15, 14, 27, 0.08); }
+.tut-nav-item.done .tut-nav-name { color: #6B6A85; }
+
+.tut-nav-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.tut-nav-info { flex: 1; min-width: 0; }
+.tut-nav-name {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: #0F0E1B;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tut-nav-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: #6B6A85;
+}
+.tut-nav-done-pill {
+  background: #DCFCE7;
+  color: #15803D;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+}
+.tut-nav-arrow { color: rgba(15, 14, 27, 0.3); flex-shrink: 0; }
+
+/* ── Conteúdo do capítulo ───────────────────────────────────────────────── */
+.tut-content {
+  min-width: 0;
+}
+
+.tut-guide {
+  background: white;
+  border: 1px solid rgba(15, 14, 27, 0.08);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px -20px rgba(15, 14, 27, 0.15);
+}
+
+.tut-guide-head {
+  padding: 38px 36px 30px;
+  display: flex;
+  gap: 22px;
+  align-items: flex-start;
+  position: relative;
+  overflow: hidden;
+}
+.tut-guide-head::before {
+  content: '';
+  position: absolute;
+  top: -100px; right: -80px;
+  width: 320px; height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.55), transparent 70%);
+  pointer-events: none;
+}
+.tut-guide-emoji {
+  font-size: 50px;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.08));
+  position: relative;
+}
+.tut-guide-head-content { flex: 1; min-width: 0; position: relative; }
+.tut-guide-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: white;
+  padding: 5px 12px;
+  border-radius: 999px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 6px -3px rgba(15, 14, 27, 0.1);
+}
+.tut-guide-title {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin: 0 0 12px;
+  color: #0F0E1B;
+}
+.tut-guide-intro {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #2D2B45;
+  margin: 0;
+  max-width: 620px;
+}
+.tut-guide-deco {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+}
+
+/* ── Steps timeline ─────────────────────────────────────────────────────── */
+.tut-intro-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 36px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6B6A85;
+}
+
+.tut-steps {
+  padding: 12px 36px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.tut-step {
+  position: relative;
+  padding-left: 48px;
+  padding-bottom: 20px;
+}
+.tut-step:last-child { padding-bottom: 0; }
+
+.tut-step-num {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px -2px rgba(15, 14, 27, 0.18);
+  z-index: 1;
+}
+.tut-step-line {
+  position: absolute;
+  left: 15.5px;
+  top: 32px;
+  bottom: 0;
+  width: 1.5px;
+}
+.tut-step:last-child .tut-step-line { display: none; }
+
+.tut-step-card {
+  background: #FAFAFC;
+  border: 1px solid rgba(15, 14, 27, 0.08);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 4px;
+  transition: border-color 0.15s;
+}
+.tut-step-card:hover { border-color: rgba(124, 58, 237, 0.3); }
+
+.tut-step-title {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #0F0E1B;
+  margin: 0 0 6px;
+}
+.tut-step-desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #2D2B45;
+  margin: 0;
+}
+
+.tut-step-chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.tut-step-chips span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* ── Tip post-it ────────────────────────────────────────────────────────── */
+.tut-tip {
+  margin: 0 36px 24px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, var(--tip-bg, #FEF3C7) 0%, #FFFFFF 100%);
+  border: 1.5px solid var(--tip-color, #C9A074);
+  border-radius: 14px;
+  position: relative;
+}
+.tut-tip-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--tip-color, #C9A074);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.tut-tip-label {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--tip-color, #92400E);
+  margin-bottom: 3px;
+}
+.tut-tip-text {
+  margin: 0;
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #2D2B45;
+}
+
+/* ── Footer (CTA + marcar concluído) ────────────────────────────────────── */
+.tut-guide-foot {
+  padding: 18px 36px 28px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid rgba(15, 14, 27, 0.06);
+  background: linear-gradient(180deg, #FAFAFC 0%, #FFFFFF 100%);
+  flex-wrap: wrap;
+}
+
+.tut-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  border-radius: 12px;
+  padding: 12px 22px;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  box-shadow: 0 6px 16px -6px rgba(15, 14, 27, 0.25);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.tut-cta:hover { transform: translateY(-2px); box-shadow: 0 10px 22px -6px rgba(15, 14, 27, 0.3); }
+
+.tut-mark {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: white;
+  border: 1.5px solid rgba(15, 14, 27, 0.12);
+  color: #2D2B45;
+  border-radius: 12px;
+  padding: 11px 18px;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tut-mark:hover { border-color: #16A34A; color: #15803D; }
+.tut-mark.done { border-color: #16A34A; }
+
+/* ── Fim do capítulo ────────────────────────────────────────────────────── */
+.tut-end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 20px;
+  background: #FAFAFC;
+  border-top: 1px dashed rgba(15, 14, 27, 0.08);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6B6A85;
+}
+.tut-end-stars {
+  display: flex;
+  gap: 4px;
+  color: #FBBF24;
+}
+
+/* ── Responsivo ─────────────────────────────────────────────────────────── */
+@media (max-width: 980px) {
+  .tut-shell {
+    grid-template-columns: 1fr;
+    margin-top: -28px;
+    padding: 0 20px;
+  }
+  .tut-nav {
+    position: relative;
+    top: 0;
+    max-height: 320px;
+  }
+  .tut-hero { padding: 50px 24px 64px; }
+  .tut-hero-stats { width: 100%; }
+  .tut-hero-stat { flex: 1; padding: 10px 12px; min-width: 0; }
+  .tut-guide-head { padding: 28px 24px 22px; flex-direction: column; gap: 14px; }
+  .tut-guide-emoji { font-size: 40px; }
+  .tut-tip { margin: 0 20px 18px; }
+  .tut-steps { padding: 8px 20px 22px; }
+  .tut-guide-foot { padding: 16px 20px 22px; }
+  .tut-mark { margin-left: 0; }
+  .tut-onboard-banner { flex-wrap: wrap; padding: 14px 18px; }
+}
+@media (max-width: 540px) {
+  .tut-hero-title { font-size: clamp(28px, 8vw, 36px); }
+  .tut-hero-stats { flex-direction: column; }
+  .tut-hero-stat { border-right: none; border-bottom: 1px solid rgba(15, 14, 27, 0.06); }
+  .tut-hero-stat:last-child { border-bottom: none; }
+}

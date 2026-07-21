@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Environment variables — NUNCA commitar
+.env
+.env.local
+.env.*.local
+
+# Claude Code — settings locais com permissões podem capturar segredos em comandos
+.claude/settings.local.json
+.claude/cache/
+.claude/transcripts/
+
+# Build output
+dist/
+dist-ssr/
+
+# Vite
+*.local
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db

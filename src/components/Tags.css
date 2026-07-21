@@ -1,0 +1,344 @@
+/* ─── Tag chips ──────────────────────────────────────────────────────────── */
+.tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+.tagchip-xs {
+  font-size: 9.5px;
+  padding: 2px 7px;
+}
+.tagchip-sm {
+  font-size: 10.5px;
+  padding: 3px 9px;
+}
+.tagchip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.tagchip-more {
+  background: #F1F5F9;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
+}
+.tagchip-remove {
+  background: rgba(0, 0, 0, 0.04);
+  border: none;
+  padding: 1px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: inherit;
+  margin-left: 1px;
+}
+.tagchip-remove:hover { background: rgba(0, 0, 0, 0.12); }
+
+.taglist {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* ─── Picker / Filter triggers ───────────────────────────────────────────── */
+.tagpicker, .tagfilter {
+  position: relative;
+  display: inline-block;
+}
+
+.tagpicker-trigger, .tagfilter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  font-family: inherit;
+}
+.tagpicker-trigger:hover, .tagfilter-trigger:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.tagfilter-trigger.active {
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+  color: #1D4ED8;
+}
+.tagpicker-count {
+  background: #2563EB;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-left: 1px;
+  line-height: 1.3;
+}
+
+/* ─── Popover ────────────────────────────────────────────────────────────── */
+.tagpicker-pop, .tagfilter-pop {
+  position: absolute;
+  z-index: 50;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 14, 27, 0.15), 0 2px 8px rgba(15, 14, 27, 0.06);
+  padding: 6px;
+  min-width: 220px;
+  max-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  animation: tagpop 0.16s ease-out;
+}
+@keyframes tagpop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.tagpicker-pop-bottom-left, .tagfilter-pop {
+  top: calc(100% + 6px);
+  left: 0;
+}
+.tagpicker-pop-bottom-right {
+  top: calc(100% + 6px);
+  right: 0;
+}
+
+.tagpicker-header, .tagfilter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 9px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.tagfilter-clear {
+  background: transparent;
+  border: none;
+  color: #DC2626;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-transform: uppercase;
+  font-family: inherit;
+}
+.tagfilter-clear:hover { color: #B91C1C; }
+
+.tagpicker-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.tagpicker-empty small {
+  font-size: 11px;
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.tagpicker-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+.tagpicker-row-wrap {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.tagpicker-row-wrap:hover { background: var(--bg-hover); }
+.tagpicker-row-wrap:hover .tagpicker-edit-btn { opacity: 1; }
+.tagpicker-row-wrap.on { background: #F8FAFC; }
+.tagpicker-row-wrap .tagpicker-row {
+  flex: 1;
+  border-radius: 6px 0 0 6px;
+}
+.tagpicker-row-wrap .tagpicker-row:hover { background: transparent; }
+
+.tagpicker-edit-btn {
+  opacity: 0;
+  background: transparent;
+  border: none;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 0 6px 6px 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.tagpicker-edit-btn:hover { color: #2563EB; }
+
+.tagpicker-row:hover { background: var(--bg-hover); }
+.tagpicker-row.on {
+  background: #F8FAFC;
+  font-weight: 600;
+}
+.tagpicker-row-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tagpicker-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Criar nova etiqueta inline ─────────────────────────────────────────── */
+.tagpicker-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #2563EB;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+  transition: background 0.1s;
+}
+.tagpicker-new-btn:hover { background: #EFF6FF; }
+
+.tagpicker-create-form {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding: 10px 4px 4px;
+}
+.tagpicker-create-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 5px 10px;
+}
+.tagpicker-color-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.tagpicker-color-dot:hover { transform: scale(1.15); }
+.tagpicker-color-dot.active {
+  border-color: #1E3A5F;
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
+}
+.tagpicker-create-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 5px;
+  margin-bottom: 8px;
+}
+.tagpicker-create-input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.tagpicker-create-input:focus { border-color: #2563EB; }
+.tagpicker-create-input::placeholder { color: var(--text-muted); }
+.tagpicker-create-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 0 5px;
+}
+.tagpicker-create-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.tagpicker-create-cancel:hover { background: var(--bg-hover); }
+.tagpicker-create-save {
+  background: #2563EB;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.tagpicker-create-save:hover:not(:disabled) { background: #1D4ED8; }
+.tagpicker-create-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.tagfilter-foot {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding: 8px 10px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Versão mobile dos popovers */
+@media (max-width: 540px) {
+  .tagpicker-pop, .tagfilter-pop {
+    min-width: 180px;
+    max-width: 240px;
+  }
+}
