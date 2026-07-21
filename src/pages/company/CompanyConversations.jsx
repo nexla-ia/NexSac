@@ -1344,21 +1344,16 @@ export default function CompanyConversations() {
   }
 
   // Visual "de mentira": nunca busca/grava nada de verdade. O texto é gerado
-  // localmente a partir do id da mensagem (sempre o mesmo pra cada mensagem,
-  // sem precisar de banco); o botão só alterna se ele aparece ou não.
-  // Abrir finge um processamento (delay randômico 5-6s); fechar é instantâneo.
-  const FAKE_TRANSCRIPTS = [
-    'Áudio recebido, sem observações adicionais além do que já foi dito na conversa.',
-    'Mensagem de voz confirmando o combinado anterior.',
-  ]
-  const FAKE_SUMMARIES = [
-    'Documento com as informações principais do assunto tratado nesta conversa.',
-    'Resumo: arquivo enviado contém os dados necessários para dar sequência ao atendimento.',
-  ]
-
+  // localmente a partir da própria mensagem (o texto que já veio junto com o
+  // áudio/pdf/imagem, escondido pelo suppressCaption) — sem precisar de banco.
+  // O botão só alterna se ele aparece ou não. Abrir finge um processamento
+  // (delay randômico 5-6s); fechar é instantâneo.
   function getFakeResultText(msg, kind) {
-    const pool = kind === 'transcript' ? FAKE_TRANSCRIPTS : FAKE_SUMMARIES
-    return pool[Math.abs(msg.id) % pool.length]
+    const rawContent = msg.content || ''
+    const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
+    const real = (fileLineMatch ? fileLineMatch[3]?.trim() : rawContent) || ''
+    if (real) return real
+    return kind === 'transcript' ? 'Sem transcrição disponível para este áudio.' : 'Sem resumo disponível para este arquivo.'
   }
 
   function handleOpenResult(msgId) {
