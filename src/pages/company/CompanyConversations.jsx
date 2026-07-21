@@ -235,9 +235,8 @@ export default function CompanyConversations() {
   const [deletingMsgId, setDeletingMsgId] = useState(null)
   const [togglingAwaiting, setTogglingAwaiting] = useState(false)
   const [expandedMsgIds, setExpandedMsgIds] = useState(() => new Set())
-  const [transcribingId, setTranscribingId] = useState(null)
-  const [summarizingId, setSummarizingId] = useState(null)
-  const [hiddenResultIds, setHiddenResultIds] = useState(() => new Set())
+  const [openResultIds, setOpenResultIds] = useState(() => new Set())
+  const [loadingResultIds, setLoadingResultIds] = useState(() => new Set())
   const [showEmoji, setShowEmoji]         = useState(false)
   const emojiPickerRef                    = useRef(null)
   const [readsMap, setReadsMap]           = useState({}) // session_id → last_read_at ISO
@@ -1344,8 +1343,10 @@ export default function CompanyConversations() {
     }
   }
 
-  // Visual "de mentira": não chama nenhum serviço real de IA — só finge um
-  // tempo de processamento e grava um texto padrão no banco (persiste no reload).
+  // Visual "de mentira": nunca busca/grava nada de verdade. O texto é gerado
+  // localmente a partir do id da mensagem (sempre o mesmo pra cada mensagem,
+  // sem precisar de banco); o botão só alterna se ele aparece ou não.
+  // Abrir finge um processamento (delay randômico 5-6s); fechar é instantâneo.
   const FAKE_TRANSCRIPTS = [
     'Áudio recebido, sem observações adicionais além do que já foi dito na conversa.',
     'Mensagem de voz confirmando o combinado anterior.',
@@ -1355,41 +1356,81 @@ export default function CompanyConversations() {
     'Resumo: arquivo enviado contém os dados necessários para dar sequência ao atendimento.',
   ]
 
-  async function handleTranscribeAudio(msg) {
-    if (transcribingId || msg.transcript) return
-    setTranscribingId(msg.id)
-    await new Promise(r => setTimeout(r, 4000))
-    const transcript = FAKE_TRANSCRIPTS[msg.id % FAKE_TRANSCRIPTS.length]
-    const { error } = await supabase.from('mensagens_geral').update({ transcript }).eq('id', msg.id)
-    if (error) {
-      setToast({ message: 'Não salvou no banco: ' + error.message, color: '#DC2626' })
-      setTimeout(() => setToast(null), 5000)
-    }
-    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, transcript } : m))
-    setTranscribingId(null)
+  function getFakeResultText(msg, kind) {
+    const pool = kind === 'transcript' ? FAKE_TRANSCRIPTS : FAKE_SUMMARIES
+    return pool[Math.abs(msg.id) % pool.length]
   }
 
-  function toggleResultVisible(msgId) {
-    setHiddenResultIds(prev => {
-      const next = new Set(prev)
-      if (next.has(msgId)) next.delete(msgId)
-      else next.add(msgId)
-      return next
-    })
+  function handleOpenResult(msgId) {
+    if (openResultIds.has(msgId) || loadingResultIds.has(msgId)) return
+    setLoadingResultIds(prev => new Set(prev).add(msgId))
+    const delay = 5000 + Math.random() * 1000
+    setTimeout(() => {
+      setLoadingResultIds(prev => { const n = new Set(prev); n.delete(msgId); return n })
+      setOpenResultIds(prev => new Set(prev).add(msgId))
+    }, delay)
   }
 
-  async function handleSummarizePdf(msg) {
-    if (summarizingId || msg.summary) return
-    setSummarizingId(msg.id)
-    await new Promise(r => setTimeout(r, 4000))
-    const summary = FAKE_SUMMARIES[msg.id % FAKE_SUMMARIES.length]
-    const { error } = await supabase.from('mensagens_geral').update({ summary }).eq('id', msg.id)
-    if (error) {
-      setToast({ message: 'Não salvou no banco: ' + error.message, color: '#DC2626' })
-      setTimeout(() => setToast(null), 5000)
+  function handleCloseResult(msgId) {
+    setOpenResultIds(prev => { const n = new Set(prev); n.delete(msgId); return n })
+  }
+
+  // Renderiza o bloco (card aberto OU botão fechado) pra áudio/imagem/pdf
+  function renderResultBlock(msg, kind) {
+    const isAtd = msg.type === 'atendente'
+    const label = kind === 'transcript' ? 'Transcrição' : 'Resumo'
+    const actionLabel = kind === 'transcript' ? 'Transcrever' : 'Resumir'
+    const loadingLabel = kind === 'transcript' ? 'Transcrevendo...' : 'Resumindo...'
+    const isOpen = openResultIds.has(msg.id)
+    const isLoading = loadingResultIds.has(msg.id)
+    if (isOpen) {
+      return (
+        <div style={{
+          marginTop: 6, borderRadius: 8, padding: '8px 10px',
+          background: isAtd ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
+          border: `1px solid ${isAtd ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+              color: isAtd ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+            }}>
+              <Sparkles size={10} /> {label}
+            </span>
+            <button onClick={() => handleCloseResult(msg.id)} title="Ocultar"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                display: 'inline-flex', color: isAtd ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
+              }}>
+              <X size={12} />
+            </button>
+          </div>
+          <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', color: isAtd ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)' }}>
+            {getFakeResultText(msg, kind)}
+          </div>
+        </div>
+      )
     }
-    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, summary } : m))
-    setSummarizingId(null)
+    return (
+      <button
+        onClick={() => handleOpenResult(msg.id)}
+        disabled={isLoading}
+        style={{
+          marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+          cursor: isLoading ? 'default' : 'pointer',
+          border: `1px solid ${isAtd ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
+          background: isAtd ? 'rgba(255,255,255,0.12)' : 'transparent',
+          color: isAtd ? '#fff' : 'var(--text-secondary)',
+          opacity: isLoading ? 0.75 : 1,
+        }}
+      >
+        {isLoading ? (
+          <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> {loadingLabel}</>
+        ) : (<><Sparkles size={11} /> {actionLabel}</>)}
+      </button>
+    )
   }
 
   async function handleDeleteMessage(msg) {
@@ -2258,108 +2299,14 @@ export default function CompanyConversations() {
                               if (media.type === 'audio') return (
                                 <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
                                   <AudioPlayer src={src} />
-                                  {msg.transcript && !hiddenResultIds.has(msg.id) ? (
-                                    <div style={{
-                                      marginTop: 6, borderRadius: 8, padding: '8px 10px',
-                                      background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
-                                      border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
-                                    }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
-                                        <span style={{
-                                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                                          fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
-                                          color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
-                                        }}>
-                                          <Sparkles size={10} /> Transcrição
-                                        </span>
-                                        <button onClick={() => toggleResultVisible(msg.id)} title="Ocultar"
-                                          style={{
-                                            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                                            display: 'inline-flex', color: isAtendente ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
-                                          }}>
-                                          <X size={12} />
-                                        </button>
-                                      </div>
-                                      <div style={{
-                                        fontSize: 12.5, whiteSpace: 'pre-wrap',
-                                        color: isAtendente ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)',
-                                      }}>
-                                        {msg.transcript}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      onClick={() => msg.transcript ? toggleResultVisible(msg.id) : handleTranscribeAudio(msg)}
-                                      disabled={transcribingId === msg.id}
-                                      style={{
-                                        marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
-                                        fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                                        cursor: transcribingId === msg.id ? 'default' : 'pointer',
-                                        border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
-                                        background: isAtendente ? 'rgba(255,255,255,0.12)' : 'transparent',
-                                        color: isAtendente ? '#fff' : 'var(--text-secondary)',
-                                        opacity: transcribingId === msg.id ? 0.75 : 1,
-                                      }}
-                                    >
-                                      {transcribingId === msg.id ? (
-                                        <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Transcrevendo...</>
-                                      ) : (<><Sparkles size={11} /> {msg.transcript ? 'Ver transcrição' : 'Transcrever'}</>)}
-                                    </button>
-                                  )}
+                                  {renderResultBlock(msg, 'transcript')}
                                 </div>
                               )
                               if (media.type === 'image') return (
                                 <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
                                   <img src={src} alt="mídia" style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', cursor: 'zoom-in' }}
                                     onClick={() => setLightbox(src)} />
-                                  {msg.summary && !hiddenResultIds.has(msg.id) ? (
-                                    <div style={{
-                                      marginTop: 6, borderRadius: 8, padding: '8px 10px',
-                                      background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
-                                      border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
-                                    }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
-                                        <span style={{
-                                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                                          fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
-                                          color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
-                                        }}>
-                                          <Sparkles size={10} /> Resumo
-                                        </span>
-                                        <button onClick={() => toggleResultVisible(msg.id)} title="Ocultar"
-                                          style={{
-                                            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                                            display: 'inline-flex', color: isAtendente ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
-                                          }}>
-                                          <X size={12} />
-                                        </button>
-                                      </div>
-                                      <div style={{
-                                        fontSize: 12.5, whiteSpace: 'pre-wrap',
-                                        color: isAtendente ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)',
-                                      }}>
-                                        {msg.summary}
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      onClick={() => msg.summary ? toggleResultVisible(msg.id) : handleSummarizePdf(msg)}
-                                      disabled={summarizingId === msg.id}
-                                      style={{
-                                        marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
-                                        fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                                        cursor: summarizingId === msg.id ? 'default' : 'pointer',
-                                        border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
-                                        background: isAtendente ? 'rgba(255,255,255,0.12)' : 'transparent',
-                                        color: isAtendente ? '#fff' : 'var(--text-secondary)',
-                                        opacity: summarizingId === msg.id ? 0.75 : 1,
-                                      }}
-                                    >
-                                      {summarizingId === msg.id ? (
-                                        <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resumindo...</>
-                                      ) : (<><Sparkles size={11} /> {msg.summary ? 'Ver resumo' : 'Resumir'}</>)}
-                                    </button>
-                                  )}
+                                  {renderResultBlock(msg, 'summary')}
                                 </div>
                               )
                               if (media.type === 'video') return (
@@ -2390,54 +2337,7 @@ export default function CompanyConversations() {
                                         <div style={{ fontSize: 11, color: '#6B7280' }}>Clique para baixar/abrir</div>
                                       </div>
                                     </a>
-                                    {msg.summary && !hiddenResultIds.has(msg.id) ? (
-                                      <div style={{
-                                        marginTop: 6, borderRadius: 8, padding: '8px 10px',
-                                        background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
-                                        border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
-                                      }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
-                                          <span style={{
-                                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                                            fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
-                                            color: isAtendente ? 'rgba(255,255,255,0.85)' : '#7C3AED',
-                                          }}>
-                                            <Sparkles size={10} /> Resumo
-                                          </span>
-                                          <button onClick={() => toggleResultVisible(msg.id)} title="Ocultar"
-                                            style={{
-                                              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                                              display: 'inline-flex', color: isAtendente ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
-                                            }}>
-                                            <X size={12} />
-                                          </button>
-                                        </div>
-                                        <div style={{
-                                          fontSize: 12.5, whiteSpace: 'pre-wrap',
-                                          color: isAtendente ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)',
-                                        }}>
-                                          {msg.summary}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        onClick={() => msg.summary ? toggleResultVisible(msg.id) : handleSummarizePdf(msg)}
-                                        disabled={summarizingId === msg.id}
-                                        style={{
-                                          marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
-                                          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                                          cursor: summarizingId === msg.id ? 'default' : 'pointer',
-                                          border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
-                                          background: isAtendente ? 'rgba(255,255,255,0.12)' : 'transparent',
-                                          color: isAtendente ? '#fff' : 'var(--text-secondary)',
-                                          opacity: summarizingId === msg.id ? 0.75 : 1,
-                                        }}
-                                      >
-                                        {summarizingId === msg.id ? (
-                                          <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Resumindo...</>
-                                        ) : (<><Sparkles size={11} /> {msg.summary ? 'Ver resumo' : 'Resumir'}</>)}
-                                      </button>
-                                    )}
+                                    {renderResultBlock(msg, 'summary')}
                                   </div>
                                 )
                               }
