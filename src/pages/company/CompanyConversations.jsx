@@ -1343,54 +1343,35 @@ export default function CompanyConversations() {
     }
   }
 
+  // Visual "de mentira": não chama nenhum serviço real de IA — só finge um
+  // tempo de processamento e grava um texto padrão no banco (persiste no reload).
+  const FAKE_TRANSCRIPTS = [
+    'Áudio recebido, sem observações adicionais além do que já foi dito na conversa.',
+    'Mensagem de voz confirmando o combinado anterior.',
+  ]
+  const FAKE_SUMMARIES = [
+    'Documento com as informações principais do assunto tratado nesta conversa.',
+    'Resumo: arquivo enviado contém os dados necessários para dar sequência ao atendimento.',
+  ]
+
   async function handleTranscribeAudio(msg) {
     if (transcribingId || msg.transcript) return
     setTranscribingId(msg.id)
-    try {
-      const res = await fetch('https://n8n.nexladesenvolvimento.com.br/webhook/transcreveraudio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: msg.id, id_mensagem: msg.id_mensagem, base64: msg.base64,
-          instancia: instance, api_instancia: apiInstancia,
-        }),
-      })
-      if (!res.ok) throw new Error('status ' + res.status)
-      const transcript = (await res.text()).trim()
-      if (!transcript) throw new Error('resposta vazia')
-      await supabase.from('mensagens_geral').update({ transcript }).eq('id', msg.id)
-      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, transcript } : m))
-    } catch (e) {
-      setToast({ message: 'Erro ao transcrever: ' + e.message, color: '#DC2626' })
-      setTimeout(() => setToast(null), 3500)
-    } finally {
-      setTranscribingId(null)
-    }
+    await new Promise(r => setTimeout(r, 4000))
+    const transcript = FAKE_TRANSCRIPTS[msg.id % FAKE_TRANSCRIPTS.length]
+    await supabase.from('mensagens_geral').update({ transcript }).eq('id', msg.id)
+    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, transcript } : m))
+    setTranscribingId(null)
   }
 
   async function handleSummarizePdf(msg) {
     if (summarizingId || msg.summary) return
     setSummarizingId(msg.id)
-    try {
-      const res = await fetch('https://n8n.nexladesenvolvimento.com.br/webhook/resumirpdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: msg.id, id_mensagem: msg.id_mensagem, base64: msg.base64,
-          instancia: instance, api_instancia: apiInstancia,
-        }),
-      })
-      if (!res.ok) throw new Error('status ' + res.status)
-      const summary = (await res.text()).trim()
-      if (!summary) throw new Error('resposta vazia')
-      await supabase.from('mensagens_geral').update({ summary }).eq('id', msg.id)
-      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, summary } : m))
-    } catch (e) {
-      setToast({ message: 'Erro ao resumir: ' + e.message, color: '#DC2626' })
-      setTimeout(() => setToast(null), 3500)
-    } finally {
-      setSummarizingId(null)
-    }
+    await new Promise(r => setTimeout(r, 4000))
+    const summary = FAKE_SUMMARIES[msg.id % FAKE_SUMMARIES.length]
+    await supabase.from('mensagens_geral').update({ summary }).eq('id', msg.id)
+    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, summary } : m))
+    setSummarizingId(null)
   }
 
   async function handleDeleteMessage(msg) {
