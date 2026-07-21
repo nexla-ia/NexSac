@@ -2298,11 +2298,8 @@ export default function CompanyConversations() {
                                 </div>
                               )
                               if (media.type === 'image') return (
-                                <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
-                                  <img src={src} alt="mídia" style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', cursor: 'zoom-in' }}
-                                    onClick={() => setLightbox(src)} />
-                                  {renderResultBlock(msg, 'summary')}
-                                </div>
+                                <img src={src} alt="mídia" style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', marginBottom: hasOnlyMedia ? 0 : 6, cursor: 'zoom-in' }}
+                                  onClick={() => setLightbox(src)} />
                               )
                               if (media.type === 'video') return (
                                 <video controls style={{ maxWidth: 280, width: '100%', borderRadius: 8, display: 'block', marginBottom: hasOnlyMedia ? 0 : 6 }}>

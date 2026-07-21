@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import EmojiPicker from 'emoji-picker-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileText, BellOff, Bell, ChevronRight, Loader2, Phone, X, MessageCircle, UserPlus, Check, Pencil, Search } from 'lucide-react'
+import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileText, BellOff, Bell, ChevronRight, Loader2, Phone, X, MessageCircle, UserPlus, Check, Pencil, Search, Sparkles } from 'lucide-react'
 import { useContactTags, TagList, TagPicker, TagFilter, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import './Company.css'
@@ -140,6 +140,8 @@ export default function CompanyGroups() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [highlightId, setHighlightId] = useState(null)
   const msgRefs = useRef({})
+  const [openResultIds, setOpenResultIds] = useState(() => new Set())
+  const [loadingResultIds, setLoadingResultIds] = useState(() => new Set())
   const [showEmoji, setShowEmoji] = useState(false)
   const [mentionMembers, setMentionMembers] = useState([])   // lista de membros para mention
   const [mentionLoading, setMentionLoading] = useState(false)
@@ -618,6 +620,88 @@ export default function CompanyGroups() {
     setSearchResults([])
   }
 
+  // Mesmo esquema "de mentira" da tela de Conversas: nunca busca/grava nada
+  // de verdade — só alterna se o texto real (que já veio junto com o
+  // áudio/pdf, escondido) aparece ou não. Abrir finge um processamento
+  // (delay randômico 5-6s); fechar é instantâneo.
+  function getRealResultText(msg, kind) {
+    const rawContent = msg.mensagem || ''
+    const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
+    const real = (fileLineMatch ? fileLineMatch[3]?.trim() : rawContent) || ''
+    if (real) return real
+    return kind === 'transcript' ? 'Sem transcrição disponível para este áudio.' : 'Sem resumo disponível para este arquivo.'
+  }
+
+  function handleOpenResult(msgId) {
+    if (openResultIds.has(msgId) || loadingResultIds.has(msgId)) return
+    setLoadingResultIds(prev => new Set(prev).add(msgId))
+    const delay = 5000 + Math.random() * 1000
+    setTimeout(() => {
+      setLoadingResultIds(prev => { const n = new Set(prev); n.delete(msgId); return n })
+      setOpenResultIds(prev => new Set(prev).add(msgId))
+    }, delay)
+  }
+
+  function handleCloseResult(msgId) {
+    setOpenResultIds(prev => { const n = new Set(prev); n.delete(msgId); return n })
+  }
+
+  function renderResultBlock(msg, kind, isAtd) {
+    const label = kind === 'transcript' ? 'Transcrição' : 'Resumo'
+    const actionLabel = kind === 'transcript' ? 'Transcrever' : 'Resumir'
+    const loadingLabel = kind === 'transcript' ? 'Transcrevendo...' : 'Resumindo...'
+    const isOpen = openResultIds.has(msg.id)
+    const isLoading = loadingResultIds.has(msg.id)
+    if (isOpen) {
+      return (
+        <div style={{
+          marginTop: 6, borderRadius: 8, padding: '8px 10px',
+          background: isAtd ? 'rgba(255,255,255,0.14)' : '#F5F3FF',
+          border: `1px solid ${isAtd ? 'rgba(255,255,255,0.3)' : '#DDD6FE'}`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+              color: isAtd ? 'rgba(255,255,255,0.85)' : '#7C3AED',
+            }}>
+              <Sparkles size={10} /> {label}
+            </span>
+            <button onClick={() => handleCloseResult(msg.id)} title="Ocultar"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                display: 'inline-flex', color: isAtd ? 'rgba(255,255,255,0.7)' : '#7C3AED', opacity: 0.7,
+              }}>
+              <X size={12} />
+            </button>
+          </div>
+          <div style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', color: isAtd ? 'rgba(255,255,255,0.95)' : 'var(--text-secondary)' }}>
+            {getRealResultText(msg, kind)}
+          </div>
+        </div>
+      )
+    }
+    return (
+      <button
+        onClick={() => handleOpenResult(msg.id)}
+        disabled={isLoading}
+        style={{
+          marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+          cursor: isLoading ? 'default' : 'pointer',
+          border: `1px solid ${isAtd ? 'rgba(255,255,255,0.5)' : '#CBD5E1'}`,
+          background: isAtd ? 'rgba(255,255,255,0.12)' : 'transparent',
+          color: isAtd ? '#fff' : 'var(--text-secondary)',
+          opacity: isLoading ? 0.75 : 1,
+        }}
+      >
+        {isLoading ? (
+          <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> {loadingLabel}</>
+        ) : (<><Sparkles size={11} /> {actionLabel}</>)}
+      </button>
+    )
+  }
+
   function toggleMute(idgrupo) {
     const current = getMutedGroups(instance)
     const next = current.includes(idgrupo)
@@ -1061,6 +1145,13 @@ export default function CompanyGroups() {
                 const isAtendente = type === 'atendente' || type === 'humano'
                 const ts = parseTs(msg)
                 const media = detectMedia(msg.base64)
+                const rawContent = msg.mensagem || ''
+                const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
+                const fileLine = fileLineMatch?.[1] || null
+                const isPlaceholder = !!fileLine
+                // PDF e imagem nunca mostram texto junto — só a mídia (igual Conversas)
+                const suppressCaption = media?.type === 'pdf' || media?.type === 'image'
+                const displayContent = suppressCaption ? '' : (isPlaceholder ? (fileLineMatch[3]?.trim() || '') : rawContent)
                 return (
                   <div key={msg.id} className={`msg-row ${isAtendente ? 'client' : 'ai'}`}
                     ref={el => { if (el) msgRefs.current[msg.id] = el }}
@@ -1077,7 +1168,10 @@ export default function CompanyGroups() {
                       )}
                       <div className="msg-bubble" style={{ maxWidth: '100%', wordBreak: 'break-word', padding: media?.type === 'image' ? 4 : undefined }}>
                         {media?.type === 'audio' && (
-                          <audio controls src={media.src} style={{ maxWidth: 240, height: 32 }} />
+                          <div>
+                            <audio controls src={media.src} style={{ maxWidth: 240, height: 32 }} />
+                            {renderResultBlock(msg, 'transcript', isAtendente)}
+                          </div>
                         )}
                         {media?.type === 'image' && (
                           <img src={media.src} alt="imagem"
@@ -1087,9 +1181,36 @@ export default function CompanyGroups() {
                           <video controls src={media.src}
                             style={{ maxWidth: 240, borderRadius: 8, display: 'block' }} />
                         )}
-                        {(!media || media.type === 'pdf') && msg.mensagem && (
+                        {media?.type === 'pdf' && (() => {
+                          const fileName = (fileLine || '').replace(/^📄\s*/, '').trim() || 'documento.pdf'
+                          return (
+                            <div>
+                              <a href={media.src} download={fileName} target="_blank" rel="noreferrer"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 10,
+                                  background: '#FEF2F2', border: '1px solid #FECACA',
+                                  borderRadius: 8, padding: '10px 14px', textDecoration: 'none',
+                                  minWidth: 200,
+                                }}>
+                                <div style={{
+                                  width: 32, height: 32, borderRadius: 6, background: '#FEE2E2',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  color: '#DC2626', fontWeight: 700, fontSize: 10, flexShrink: 0,
+                                }}>PDF</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {fileName}
+                                  </div>
+                                  <div style={{ fontSize: 10.5, color: '#6B7280' }}>Clique para baixar/abrir</div>
+                                </div>
+                              </a>
+                              {renderResultBlock(msg, 'summary', isAtendente)}
+                            </div>
+                          )
+                        })()}
+                        {!media && displayContent && (
                           <span style={{ whiteSpace: 'pre-wrap' }}>
-                            {renderTextWithLinks(msg.mensagem, {
+                            {renderTextWithLinks(displayContent, {
                               color: (msg.type || '').toLowerCase() === 'atendente' || (msg.type || '').toLowerCase() === 'humano'
                                 ? 'rgba(255,255,255,0.9)' : '#2563EB',
                               textDecoration: 'underline',
