@@ -122,13 +122,21 @@ export default function CompanyCRM() {
     let myFunnels = fn || [], myStages = st || []
 
     if (myFunnels.length === 0) {
-      const { data: nf } = await supabase.from('crm_funnels')
+      const { data: nf, error: nfErr } = await supabase.from('crm_funnels')
         .insert({ instancia: instance, nome: 'Funil Principal', posicao: 0 }).select().single()
       if (nf) {
         myFunnels = [nf]
         const { data: ns } = await supabase.from('crm_stages')
           .insert(DEFAULT_STAGES.map(s => ({ ...s, funil_id: nf.id, instancia: instance }))).select()
         if (ns) myStages = ns.sort((a,b) => a.posicao - b.posicao)
+      } else if (nfErr) {
+        // outra aba/sessão já criou o funil principal nesse meio tempo — recarrega em vez de duplicar
+        const [{ data: fn2 }, { data: st2 }] = await Promise.all([
+          supabase.from('crm_funnels').select('*').eq('instancia', instance).order('posicao'),
+          supabase.from('crm_stages').select('*').eq('instancia', instance).order('posicao'),
+        ])
+        myFunnels = fn2 || []
+        myStages = st2 || []
       }
     }
 
@@ -681,10 +689,16 @@ export default function CompanyCRM() {
                     const stage = stages.find(s => s.id === c.stage_id)
                     const days = daysIn(c.data_entrada_etapa)
                     const over = stage?.alerta_dias ? days - stage.alerta_dias : 0
+                    const veryOver = over > 14
                     const temp = TEMP[c.temperatura] || TEMP.frio
                     return (
                       <div key={c.id} onClick={() => setPanel(c)}
-                        style={{ background:C.card, border:'1.5px solid #FDE68A', borderLeft:'4px solid #D97706', borderRadius:10, padding:'12px 16px', cursor:'pointer', display:'flex', alignItems:'center', gap:14, transition:'box-shadow 0.15s' }}
+                        style={{
+                          background:C.card,
+                          border: `1.5px solid ${veryOver ? '#FECACA' : '#FDE68A'}`,
+                          borderLeft: `4px solid ${veryOver ? '#DC2626' : '#D97706'}`,
+                          borderRadius:10, padding:'12px 16px', cursor:'pointer', display:'flex', alignItems:'center', gap:14, transition:'box-shadow 0.15s',
+                        }}
                         onMouseEnter={e=>e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'}
                         onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
                         <div style={{ width:38,height:38,borderRadius:'50%',background:stage?.cor||C.slate,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:14,flexShrink:0 }}>
@@ -699,7 +713,7 @@ export default function CompanyCRM() {
                         </div>
                         <div style={{ textAlign:'right', flexShrink:0 }}>
                           <div style={{ fontWeight:800, fontSize:18, color:'#DC2626', lineHeight:1 }}>{days}d</div>
-                          <div style={{ fontSize:9.5, color:'#D97706', fontWeight:700 }}>+{over}d acima do limite</div>
+                          <div style={{ fontSize:9.5, color: veryOver ? '#DC2626' : '#D97706', fontWeight:700 }}>+{over}d acima do limite</div>
                         </div>
                         <div style={{ display:'flex', gap:6, flexShrink:0 }}>
                           <a href={`https://wa.me/${c.phone}`} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}
@@ -889,7 +903,11 @@ export default function CompanyCRM() {
               <div style={{ flex:1, overflowY:'auto', padding:'8px', display:'flex', flexDirection:'column', gap:7 }}>
                 {cards.map(contact => {
                   const days = daysIn(contact.data_entrada_etapa)
-                  const stale = stage.alerta_dias && days > stage.alerta_dias
+                  // Escala de 3 cores: em dia (branco) → passou do prazo (amarelo)
+                  // → mais de 2 semanas além do prazo (vermelho)
+                  const daysOverLimit = stage.alerta_dias ? days - stage.alerta_dias : 0
+                  const stale = stage.alerta_dias && daysOverLimit > 0
+                  const veryStale = stage.alerta_dias && daysOverLimit > 14
                   const temp = TEMP[contact.temperatura] || TEMP.frio
                   const initStr = initials(contact.nome, contact.phone)
                   const origemColor = ORIGEM_COLORS[contact.origem] || '#6B7280'
@@ -902,8 +920,8 @@ export default function CompanyCRM() {
                       onClick={() => setPanel(contact)}
                       className="crm-card"
                       style={{
-                        background: stale ? '#FFFBEB' : C.card,
-                        border: `1px solid ${stale ? '#FDE68A' : C.border}`,
+                        background: veryStale ? '#FEF2F2' : stale ? '#FFFBEB' : C.card,
+                        border: `1px solid ${veryStale ? '#FECACA' : stale ? '#FDE68A' : C.border}`,
                         borderRadius:10, padding:'10px 12px',
                         opacity: dragging?.id === contact.id ? 0.4 : 1,
                       }}>
@@ -972,8 +990,8 @@ export default function CompanyCRM() {
 
                       {/* Footer */}
                       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:8 }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:10, color: stale ? '#D97706' : C.muted }}>
-                          {stale ? <AlertTriangle size={10} color="#D97706"/> : <Clock size={10}/>}
+                        <div style={{ display:'flex', alignItems:'center', gap:4, fontSize:10, color: veryStale ? '#DC2626' : stale ? '#D97706' : C.muted }}>
+                          {(stale || veryStale) ? <AlertTriangle size={10} color={veryStale ? '#DC2626' : '#D97706'}/> : <Clock size={10}/>}
                           {days === 0 ? 'hoje' : `${days}d nesta etapa`}
                         </div>
                         {contact.data_ult_contato && (

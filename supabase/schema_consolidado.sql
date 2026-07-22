@@ -5298,6 +5298,7 @@ DO $$ BEGIN CREATE POLICY "crm_contacts_all"     ON public.crm_contacts     FOR 
 DO $$ BEGIN CREATE POLICY "crm_interactions_all" ON public.crm_interactions FOR ALL TO authenticated,anon USING(true) WITH CHECK(true); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS crm_funnels_inst_idx      ON public.crm_funnels(instancia);
+CREATE UNIQUE INDEX IF NOT EXISTS crm_funnels_instancia_posicao0_uidx ON public.crm_funnels(instancia) WHERE posicao = 0;
 CREATE INDEX IF NOT EXISTS crm_stages_funil_idx      ON public.crm_stages(funil_id);
 CREATE INDEX IF NOT EXISTS crm_contacts_inst_idx     ON public.crm_contacts(instancia);
 CREATE INDEX IF NOT EXISTS crm_contacts_stage_idx    ON public.crm_contacts(stage_id);
