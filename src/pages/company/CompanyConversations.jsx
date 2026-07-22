@@ -936,7 +936,8 @@ export default function CompanyConversations() {
       }, { onConflict: 'instancia,session_id,user_email' })))
     }
     setBulkMarkingRead(false)
-    setSelectedIds(new Set())
+    // Mantém a seleção (não fecha nem desmarca nada) — só limpa quando o
+    // usuário clicar em "Cancelar" ou finalizar as conversas de propósito.
     setToast({ message: `${ids.length} conversa(s) marcada(s) como lida(s)`, color: '#16A34A' })
     setTimeout(() => setToast(null), 3000)
   }
