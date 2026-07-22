@@ -2195,6 +2195,9 @@ CREATE INDEX idx_invoices_due_date ON public.invoices USING btree (due_date);
 
 CREATE INDEX idx_mensagens_geral_aplicativo ON public.mensagens_geral USING btree (instancia, aplicativo, numero);
 
+CREATE INDEX IF NOT EXISTS idx_mensagens_geral_numero_id ON public.mensagens_geral (instancia, numero, id DESC);
+CREATE INDEX IF NOT EXISTS idx_mensagens_geral_idgrupo_id ON public.mensagens_geral (instancia, idgrupo, id DESC) WHERE idgrupo IS NOT NULL;
+
 
 --
 -- Name: idx_mensagens_geral_recipient_id; Type: INDEX; Schema: public; Owner: -

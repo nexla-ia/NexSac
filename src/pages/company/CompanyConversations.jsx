@@ -297,6 +297,9 @@ export default function CompanyConversations() {
   }, [instance, session?.user?.email])
 
   // Calcula contagem inicial de não lidos (roda uma vez após contatos e leituras carregados)
+  // Uma única query cobrindo todos os contatos, em vez de 1 COUNT por contato
+  // (o N+1 antigo disparava dezenas/centenas de queries em paralelo e deixava
+  // tudo mais lento, inclusive o carregamento das mensagens da conversa aberta).
   useEffect(() => {
     if (initialCountsDone.current || !readsLoaded || loadingContacts || !contacts.length || !instance) return
     initialCountsDone.current = true
@@ -305,21 +308,25 @@ export default function CompanyConversations() {
       return !lr || (c.lastTs && new Date(c.lastTs) > new Date(lr))
     })
     if (!unread.length) return
-    Promise.all(
-      unread.map(c =>
-        supabase.from(CONV_TABLE)
-          .select('id', { count: 'exact', head: true })
-          .in('numero', numeroVariants(c.session_id))
-          .eq('instancia', instance)
-          .ilike('type', 'cliente')
-          .gt('created_at', readsMap[c.session_id] || '1970-01-01T00:00:00Z')
-          .then(({ count }) => [c.session_id, count || 0])
-      )
-    ).then(pairs => {
-      const counts = {}
-      pairs.forEach(([sid, cnt]) => { if (cnt > 0) counts[sid] = cnt })
-      setUnreadCounts(counts)
-    })
+    const EPOCH = '1970-01-01T00:00:00Z'
+    const thresholds = new Map(unread.map(c => [c.session_id, new Date(readsMap[c.session_id] || EPOCH).getTime()]))
+    const minThreshold = new Date(Math.min(...[...thresholds.values()])).toISOString()
+    supabase.from(CONV_TABLE)
+      .select('numero, created_at')
+      .eq('instancia', instance)
+      .ilike('type', 'cliente')
+      .is('idgrupo', null)
+      .gt('created_at', minThreshold)
+      .then(({ data }) => {
+        const counts = {}
+        ;(data || []).forEach(row => {
+          const sid = canonSession(row.numero)
+          const th = thresholds.get(sid)
+          if (th === undefined) return
+          if (new Date(row.created_at).getTime() > th) counts[sid] = (counts[sid] || 0) + 1
+        })
+        setUnreadCounts(counts)
+      })
   }, [readsLoaded, loadingContacts, contacts, readsMap, instance])
 
   // Carrega agendamentos futuros (próximo por contato)

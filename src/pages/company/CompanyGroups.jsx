@@ -216,6 +216,8 @@ export default function CompanyGroups() {
   }, [instance, session?.user?.email])
 
   // Calcula contagem inicial de não lidos nos grupos
+  // Uma única query cobrindo todos os grupos, em vez de 1 COUNT por grupo
+  // (o N+1 antigo disparava dezenas de queries em paralelo e deixava tudo lento).
   useEffect(() => {
     if (initialCountsDone.current || !readsLoaded || loading || !groups.length || !instance) return
     initialCountsDone.current = true
@@ -224,21 +226,24 @@ export default function CompanyGroups() {
       return !lr || (g.lastTs && new Date(g.lastTs) > new Date(lr))
     })
     if (!unread.length) return
-    Promise.all(
-      unread.map(g =>
-        supabase.from(CONV_TABLE)
-          .select('id', { count: 'exact', head: true })
-          .eq('instancia', instance)
-          .eq('idgrupo', g.idgrupo)
-          .ilike('type', 'cliente')
-          .gt('created_at', readsMap[g.idgrupo] || '1970-01-01T00:00:00Z')
-          .then(({ count }) => [g.idgrupo, count || 0])
-      )
-    ).then(pairs => {
-      const counts = {}
-      pairs.forEach(([gid, cnt]) => { if (cnt > 0) counts[gid] = cnt })
-      setUnreadCounts(counts)
-    })
+    const EPOCH = '1970-01-01T00:00:00Z'
+    const thresholds = new Map(unread.map(g => [g.idgrupo, new Date(readsMap[g.idgrupo] || EPOCH).getTime()]))
+    const minThreshold = new Date(Math.min(...[...thresholds.values()])).toISOString()
+    supabase.from(CONV_TABLE)
+      .select('idgrupo, created_at')
+      .eq('instancia', instance)
+      .ilike('type', 'cliente')
+      .not('idgrupo', 'is', null)
+      .gt('created_at', minThreshold)
+      .then(({ data }) => {
+        const counts = {}
+        ;(data || []).forEach(row => {
+          const th = thresholds.get(row.idgrupo)
+          if (th === undefined) return
+          if (new Date(row.created_at).getTime() > th) counts[row.idgrupo] = (counts[row.idgrupo] || 0) + 1
+        })
+        setUnreadCounts(counts)
+      })
   }, [readsLoaded, loading, groups, readsMap, instance])
 
   function handleSelectGroup(g) {
