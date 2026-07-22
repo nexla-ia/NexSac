@@ -1452,6 +1452,15 @@ export default function CompanyConversations() {
     if (deletingMsgId) return
     setDeletingMsgId(msg.id)
     try {
+      // Busca id_mensagem atualizado do banco (pode ter sido preenchido pelo n8n
+      // depois do envio, já que o estado local pode estar desatualizado)
+      const { data: fresh } = await supabase
+        .from('mensagens_geral')
+        .select('id_mensagem')
+        .eq('id', msg.id)
+        .maybeSingle()
+      const id_mensagem = fresh?.id_mensagem || msg.id_mensagem
+
       const { error } = await supabase.from('mensagens_geral')
         .update({ mensagem: '🚫 Mensagem apagada', base64: null })
         .eq('id', msg.id)
@@ -1461,7 +1470,7 @@ export default function CompanyConversations() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id_mensagem: msg.id_mensagem,
+          id_mensagem,
           fromMe: true,
           api: apiInstancia,
           instancia: instance,
