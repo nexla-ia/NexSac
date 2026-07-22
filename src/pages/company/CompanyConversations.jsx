@@ -1457,15 +1457,17 @@ export default function CompanyConversations() {
         .eq('id', msg.id)
       if (error) throw error
       setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: '🚫 Mensagem apagada', base64: null } : m))
-      fetch('https://n8n.nexladesenvolvimento.com.br/webhook/envioNexlaexcluir', {
+      fetch('https://n8n.nexladesenvolvimento.com.br/webhook/apagarmeg', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: msg.id, id_mensagem: msg.id_mensagem,
-          session_id: selected?.session_id, phone: selected?.phone,
-          instancia: instance, api_instancia: apiInstancia,
-          company: session?.company?.name,
-          sender_name: session?.user?.name, sender_email: session?.user?.email,
+          id_mensagem: msg.id_mensagem,
+          fromMe: true,
+          api: apiInstancia,
+          instancia: instance,
+          numero: selected?.phone,
+          remoteJid: selected?.session_id,
+          numero_empresa: session?.company?.numero_base ? `${session.company.numero_base}@s.whatsapp.net` : null,
         }),
       }).catch(e => console.warn('webhook excluir:', e))
     } catch (e) {
