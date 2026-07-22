@@ -194,6 +194,7 @@ export default function CompanyConversations() {
   const [companyUsers, setCompanyUsers] = useState([]) // outros atendentes pra transferir
   const [tab, setTab]                 = useState('recepcao')
   const [selectedIds, setSelectedIds] = useState(() => new Set()) // session_id → marcado (bulk actions)
+  const [bulkMarkingRead, setBulkMarkingRead] = useState(false)
   const [loadingContacts, setLoadingContacts] = useState(false)
   const [search, setSearch]           = useState('')
   const [tagFilter, setTagFilter]     = useState([])
@@ -911,6 +912,34 @@ export default function CompanyConversations() {
     setSelectedIds(prev => prev.size === list.length && list.length > 0
       ? new Set()
       : new Set(list.map(c => c.session_id)))
+  }
+
+  // Marca em massa as conversas selecionadas como lidas
+  async function handleBulkMarkRead() {
+    const ids = [...selectedIds]
+    if (!ids.length || bulkMarkingRead) return
+    setBulkMarkingRead(true)
+    const now = new Date().toISOString()
+    setUnreadCounts(prev => {
+      const next = { ...prev }
+      ids.forEach(sid => { delete next[sid] })
+      return next
+    })
+    setReadsMap(prev => {
+      const next = { ...prev }
+      ids.forEach(sid => { next[sid] = now })
+      return next
+    })
+    if (session?.user?.email) {
+      await Promise.all(ids.map(sid => supabase.from('conversation_reads').upsert({
+        instancia: instance, session_id: sid, user_email: session.user.email, last_read_at: now,
+      }, { onConflict: 'instancia,session_id,user_email' })))
+    }
+    setBulkMarkingRead(false)
+    // Mantém a seleção (não fecha nem desmarca nada) — só limpa quando o
+    // usuário clicar em "Cancelar" ou finalizar as conversas de propósito.
+    setToast({ message: `${ids.length} conversa(s) marcada(s) como lida(s)`, color: '#16A34A' })
+    setTimeout(() => setToast(null), 3000)
   }
 
   function handleSelectContact(c) {
@@ -1790,14 +1819,25 @@ export default function CompanyConversations() {
           {selectedIds.size > 0 && (
             <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <button
-                onClick={() => { setCloseModal({ bulk: true, count: selectedIds.size }); setReason('') }}
+                onClick={handleBulkMarkRead}
+                disabled={bulkMarkingRead}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700,
                   padding: '5px 10px', borderRadius: 8, border: '1px solid #BFDBFE', background: '#EFF6FF',
-                  color: '#2563EB', cursor: 'pointer',
+                  color: '#2563EB', cursor: bulkMarkingRead ? 'default' : 'pointer', opacity: bulkMarkingRead ? 0.6 : 1,
                 }}
               >
                 <MailOpen size={12} /> Marcar como lida
+              </button>
+              <button
+                onClick={() => { setCloseModal({ bulk: true, count: selectedIds.size }); setReason('') }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700,
+                  padding: '5px 10px', borderRadius: 8, border: '1px solid #BBF7D0', background: '#F0FDF4',
+                  color: '#16A34A', cursor: 'pointer',
+                }}
+              >
+                <CheckCircle2 size={12} /> Finalizar selecionadas
               </button>
               <button
                 onClick={() => setSelectedIds(new Set())}
