@@ -156,6 +156,7 @@ export default function CompanyGroups() {
   const recordStartRef = useRef(null)
   const recordTimerRef = useRef(null)
   const fileInputRef = useRef(null)
+  const composerInputRef = useRef(null)
   const emojiPickerRef = useRef(null)
   selectedRef.current = selected
 
@@ -178,6 +179,24 @@ export default function CompanyGroups() {
     document.addEventListener('mousedown', handleOutside)
     return () => document.removeEventListener('mousedown', handleOutside)
   }, [mentionOpen])
+
+  // Estilo WhatsApp: com o grupo aberto, já dá pra começar a digitar sem
+  // precisar clicar na barra antes.
+  useEffect(() => {
+    if (!selected || recording) return
+    if (renameModal) return
+    function handleGlobalKeydown(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key.length !== 1) return
+      const active = document.activeElement
+      const tag = active?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return
+      handleMsgChange({ target: { value: msgText + e.key } })
+      composerInputRef.current?.focus()
+    }
+    window.addEventListener('keydown', handleGlobalKeydown)
+    return () => window.removeEventListener('keydown', handleGlobalKeydown)
+  }, [selected, recording, renameModal, msgText])
 
   // Carrega leituras do usuário atual
   useEffect(() => {
@@ -1301,6 +1320,7 @@ export default function CompanyGroups() {
                   </div>
                 )}
                 <input
+                  ref={composerInputRef}
                   className="nx-input chat-composer-input"
                   style={{ flex: 1 }}
                   placeholder={attachedFile ? 'Mensagem opcional para acompanhar o arquivo…' : recordedAudio ? 'Mensagem opcional para acompanhar o áudio…' : 'Mensagem para o grupo…'}

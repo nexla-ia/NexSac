@@ -254,6 +254,7 @@ export default function CompanyConversations() {
   const recordTimerRef   = useRef(null)
   const recordStartRef   = useRef(0)
   const fileInputRef     = useRef(null)
+  const composerInputRef = useRef(null)
   const bottomRef    = useRef(null)
   const chatBodyRef  = useRef(null)
   const skipScrollRef = useRef(false)
@@ -873,6 +874,25 @@ export default function CompanyConversations() {
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     }
   }, [editingMsgId])
+
+  // Estilo WhatsApp: com a conversa aberta, já dá pra começar a digitar sem
+  // precisar clicar na barra antes — qualquer tecla "de texto" foca o
+  // composer e entra na mensagem, contanto que não tenha outro campo focado.
+  useEffect(() => {
+    if (!selected || closedMap[selected.session_id] || !canRespond(selected)) return
+    if (saveContactModal || closeModal || transferModal || manageReasonsOpen) return
+    function handleGlobalKeydown(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key.length !== 1) return // só caracteres imprimíveis (ignora Enter, Tab, setas, etc.)
+      const active = document.activeElement
+      const tag = active?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || active?.isContentEditable) return
+      setMsgText(prev => prev + e.key)
+      composerInputRef.current?.focus()
+    }
+    window.addEventListener('keydown', handleGlobalKeydown)
+    return () => window.removeEventListener('keydown', handleGlobalKeydown)
+  }, [selected, closedMap, attendancesMap, isAdmin, session?.user?.email, saveContactModal, closeModal, transferModal, manageReasonsOpen])
 
   function handleSelectContact(c) {
     setSelected(c)
@@ -2633,6 +2653,7 @@ export default function CompanyConversations() {
                     </div>
                   )}
                   <input
+                    ref={composerInputRef}
                     className="nx-input chat-composer-input"
                     style={{ flex: 1 }}
                     placeholder={
