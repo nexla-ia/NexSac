@@ -6,8 +6,10 @@ import {
   UserPlus, Flag, Edit2, Trash2, Check, Loader2, ChevronDown,
   MessageSquare, ArrowRight, Tag, Users, MoreHorizontal,
   Thermometer, GitMerge, StickyNote, Kanban, Filter, List,
-  ChevronRight, BookMarked, Zap,
+  ChevronRight, ChevronLeft, BookMarked, Zap,
 } from 'lucide-react'
+
+const STAGE_COLORS = ['#64748B','#2563EB','#7C3AED','#0891B2','#D97706','#059669','#DC2626','#DB2777','#4F46E5','#0D9488']
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -98,6 +100,10 @@ export default function CompanyCRM() {
   const [confirmDel, setConfirmDel]   = useState(null)
   const [editingCardId, setEditingCardId] = useState(null) // edição inline do nome direto no card
   const [editingCardName, setEditingCardName] = useState('')
+  const [stageModal, setStageModal]   = useState(null) // { id, nome, cor, alerta_dias, posicao, funil_id }
+  const [savingStage, setSavingStage] = useState(false)
+  const [funnelModal, setFunnelModal] = useState(null) // { nome }
+  const [savingFunnel, setSavingFunnel] = useState(false)
 
   // ── Load ───────────────────────────────────────────────────────────────────
   async function load() {
@@ -379,6 +385,77 @@ export default function CompanyCRM() {
     patchContact(contact.id, { temperatura: next })
   }
 
+  // ── Etapas (editar/reordenar/excluir) ──────────────────────────────────────
+  function openStageModal(stage) {
+    setStageModal({
+      id: stage.id, nome: stage.nome, cor: stage.cor,
+      alerta_dias: stage.alerta_dias ?? '', posicao: stage.posicao, funil_id: stage.funil_id,
+    })
+  }
+
+  async function saveStage() {
+    if (!stageModal?.nome?.trim() || savingStage) return
+    setSavingStage(true)
+    const changes = {
+      nome: stageModal.nome.trim(),
+      cor: stageModal.cor,
+      alerta_dias: stageModal.alerta_dias === '' ? null : parseInt(stageModal.alerta_dias, 10),
+    }
+    const { data, error } = await supabase.from('crm_stages').update(changes).eq('id', stageModal.id).select().single()
+    setSavingStage(false)
+    if (error) { alert('Erro ao salvar etapa: ' + error.message); return }
+    if (data) setStages(prev => prev.map(s => s.id === data.id ? data : s))
+    setStageModal(null)
+  }
+
+  async function moveStage(direction) {
+    if (!stageModal) return
+    const list = stages.filter(s => s.funil_id === stageModal.funil_id).sort((a, b) => a.posicao - b.posicao)
+    const idx = list.findIndex(s => s.id === stageModal.id)
+    const swapIdx = idx + direction
+    if (idx === -1 || swapIdx < 0 || swapIdx >= list.length) return
+    const a = list[idx], b = list[swapIdx]
+    await Promise.all([
+      supabase.from('crm_stages').update({ posicao: b.posicao }).eq('id', a.id),
+      supabase.from('crm_stages').update({ posicao: a.posicao }).eq('id', b.id),
+    ])
+    setStages(prev => prev.map(s => {
+      if (s.id === a.id) return { ...s, posicao: b.posicao }
+      if (s.id === b.id) return { ...s, posicao: a.posicao }
+      return s
+    }))
+    setStageModal(p => ({ ...p, posicao: b.posicao }))
+  }
+
+  async function deleteStage() {
+    if (!stageModal) return
+    const count = contacts.filter(c => c.stage_id === stageModal.id).length
+    if (count > 0) {
+      alert(`Não é possível excluir: ${count} lead(s) estão nesta etapa. Mova-os para outra etapa antes de excluir.`)
+      return
+    }
+    await supabase.from('crm_stages').delete().eq('id', stageModal.id)
+    setStages(prev => prev.filter(s => s.id !== stageModal.id))
+    setStageModal(null)
+  }
+
+  // ── Funis (separação por pipeline) ──────────────────────────────────────────
+  async function createFunnel() {
+    if (!funnelModal?.nome?.trim() || savingFunnel) return
+    setSavingFunnel(true)
+    const { data: nf, error } = await supabase.from('crm_funnels')
+      .insert({ instancia: instance, nome: funnelModal.nome.trim(), posicao: funnels.length })
+      .select().single()
+    if (error || !nf) { setSavingFunnel(false); alert('Erro ao criar funil: ' + (error?.message || '')); return }
+    const { data: ns } = await supabase.from('crm_stages')
+      .insert(DEFAULT_STAGES.map(s => ({ ...s, funil_id: nf.id, instancia: instance }))).select()
+    setFunnels(prev => [...prev, nf])
+    if (ns) setStages(prev => [...prev, ...ns])
+    setActiveFunnel(nf.id)
+    setSavingFunnel(false)
+    setFunnelModal(null)
+  }
+
   function startEditCardName(contact, e) {
     e.stopPropagation()
     setEditingCardId(contact.id)
@@ -504,19 +581,25 @@ export default function CompanyCRM() {
           </div>
         </div>
 
-        {/* Funil selector */}
-        {funnels.length > 1 && (
-          <div style={{ display:'flex', gap:4, marginLeft:8 }}>
-            {funnels.map(f => (
-              <button key={f.id} onClick={() => setActiveFunnel(f.id)} className="crm-btn" style={{
-                padding:'5px 12px', borderRadius:20, fontSize:11, fontWeight:600, cursor:'pointer',
-                background: activeFunnel===f.id ? C.navy : 'transparent',
-                color: activeFunnel===f.id ? '#fff' : C.slate,
-                border: `1px solid ${activeFunnel===f.id ? C.navy : C.border}`,
-              }}>{f.nome}</button>
-            ))}
-          </div>
-        )}
+        {/* Funil selector — separação em pipelines diferentes */}
+        <div style={{ display:'flex', gap:4, marginLeft:8, alignItems:'center' }}>
+          {funnels.map(f => (
+            <button key={f.id} onClick={() => setActiveFunnel(f.id)} className="crm-btn" style={{
+              padding:'5px 12px', borderRadius:20, fontSize:11, fontWeight:600, cursor:'pointer',
+              background: activeFunnel===f.id ? C.navy : 'transparent',
+              color: activeFunnel===f.id ? '#fff' : C.slate,
+              border: `1px solid ${activeFunnel===f.id ? C.navy : C.border}`,
+            }}>{f.nome}</button>
+          ))}
+          <button onClick={() => setFunnelModal({ nome: '' })} title="Novo funil" className="crm-btn"
+            style={{
+              width:24, height:24, borderRadius:'50%', border:`1.5px dashed ${C.border}`,
+              background:'transparent', color:C.muted, cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+            }}>
+            <Plus size={12}/>
+          </button>
+        </div>
 
         {/* Stats strip */}
         <div style={{ display:'flex', gap:16, marginLeft:8 }}>
@@ -791,6 +874,10 @@ export default function CompanyCRM() {
                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                   <div style={{ width:10,height:10,borderRadius:'50%',background:stage.cor,flexShrink:0 }}/>
                   <span style={{ fontWeight:700, fontSize:12.5, color:C.navy, flex:1 }}>{stage.nome}</span>
+                  <button onClick={() => openStageModal(stage)} title="Editar etapa"
+                    style={{ background:'none', border:'none', cursor:'pointer', color:C.muted, padding:2, display:'flex', flexShrink:0 }}>
+                    <Edit2 size={11}/>
+                  </button>
                   <span style={{ fontSize:11, fontWeight:700, color:'#fff', background:stage.cor, borderRadius:20, padding:'1px 8px', minWidth:20, textAlign:'center' }}>{stageTotal}</span>
                 </div>
                 {stage.alerta_dias && (
@@ -1390,6 +1477,99 @@ export default function CompanyCRM() {
             <div style={{ display:'flex',gap:8,justifyContent:'flex-end' }}>
               <button onClick={()=>setConfirmDel(null)} style={{ padding:'8px 16px',borderRadius:8,border:`1px solid ${C.border}`,background:'none',cursor:'pointer',fontSize:13 }}>Cancelar</button>
               <button onClick={()=>deleteContact(confirmDel.id)} style={{ padding:'8px 16px',borderRadius:8,background:'#DC2626',color:'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:700 }}>Remover</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: editar etapa ── */}
+      {stageModal && (
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.35)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center',padding:16 }}
+          onClick={e=>{if(e.target===e.currentTarget && !savingStage) setStageModal(null)}}>
+          <div style={{ background:C.card,borderRadius:14,padding:24,width:'100%',maxWidth:400,boxShadow:'0 20px 60px rgba(0,0,0,0.25)' }}>
+            <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:18 }}>
+              <div style={{ fontWeight:800,fontSize:15,color:C.navy }}>Editar etapa</div>
+              <button onClick={()=>setStageModal(null)} style={{ background:'none',border:'none',cursor:'pointer',color:C.muted }}><X size={16}/></button>
+            </div>
+            <div style={{ display:'flex',flexDirection:'column',gap:14 }}>
+              <div>
+                <label style={{ fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:5 }}>Nome da etapa</label>
+                <input className="nx-input" autoFocus value={stageModal.nome} onChange={e=>setStageModal(p=>({...p,nome:e.target.value}))} style={{ width:'100%',boxSizing:'border-box' }}/>
+              </div>
+              <div>
+                <label style={{ fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:5 }}>Cor</label>
+                <div style={{ display:'flex',gap:8,flexWrap:'wrap' }}>
+                  {STAGE_COLORS.map(c => (
+                    <button key={c} onClick={()=>setStageModal(p=>({...p,cor:c}))}
+                      style={{
+                        width:26,height:26,borderRadius:'50%',background:c,border:'none',cursor:'pointer',
+                        outline: stageModal.cor===c ? `2px solid ${c}` : 'none', outlineOffset:2,
+                        boxShadow: stageModal.cor===c ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : 'none',
+                      }}/>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:5 }}>Alertar se parar (dias)</label>
+                <input type="number" className="nx-input" value={stageModal.alerta_dias}
+                  onChange={e=>setStageModal(p=>({...p,alerta_dias:e.target.value}))}
+                  placeholder="Ex: 5" style={{ width:'100%',boxSizing:'border-box' }}/>
+                <div style={{ fontSize:10.5,color:C.muted,marginTop:5,lineHeight:1.4 }}>
+                  O lead vira "parado" se ficar mais que isso na etapa. Vazio = sem alerta (ex: Perdido/Fidelizado).
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:5 }}>Posição no funil</label>
+                <div style={{ display:'flex',alignItems:'center',gap:8 }}>
+                  <button onClick={()=>moveStage(-1)} title="Mover pra esquerda"
+                    style={{ width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:C.slate }}>
+                    <ChevronLeft size={14}/>
+                  </button>
+                  <button onClick={()=>moveStage(1)} title="Mover pra direita"
+                    style={{ width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:C.slate }}>
+                    <ChevronRight size={14}/>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div style={{ display:'flex',gap:8,marginTop:22,alignItems:'center' }}>
+              <button onClick={deleteStage} style={{ padding:'8px 14px',borderRadius:8,border:'1px solid #FECACA',background:'#FFF1F2',color:'#DC2626',cursor:'pointer',fontSize:12.5,fontWeight:700,display:'flex',alignItems:'center',gap:5 }}>
+                <Trash2 size={12}/> Excluir
+              </button>
+              <div style={{ flex:1 }}/>
+              <button onClick={()=>setStageModal(null)} style={{ padding:'8px 16px',borderRadius:8,border:`1px solid ${C.border}`,background:'none',cursor:'pointer',fontSize:13 }}>Cancelar</button>
+              <button onClick={saveStage} disabled={savingStage||!stageModal.nome?.trim()}
+                style={{ padding:'8px 18px',borderRadius:8,background:C.navy,color:'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,display:'flex',alignItems:'center',gap:6,opacity:!stageModal.nome?.trim()?0.5:1 }}>
+                <Check size={13}/> {savingStage?'Salvando…':'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: novo funil ── */}
+      {funnelModal && (
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.35)',zIndex:250,display:'flex',alignItems:'center',justifyContent:'center',padding:16 }}
+          onClick={e=>{if(e.target===e.currentTarget && !savingFunnel) setFunnelModal(null)}}>
+          <div style={{ background:C.card,borderRadius:14,padding:24,width:'100%',maxWidth:380,boxShadow:'0 20px 60px rgba(0,0,0,0.25)' }}>
+            <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16 }}>
+              <div style={{ fontWeight:800,fontSize:15,color:C.navy,display:'flex',alignItems:'center',gap:8 }}>
+                <GitMerge size={15} color={C.blue}/> Novo funil
+              </div>
+              <button onClick={()=>setFunnelModal(null)} style={{ background:'none',border:'none',cursor:'pointer',color:C.muted }}><X size={16}/></button>
+            </div>
+            <label style={{ fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:5 }}>Nome do funil</label>
+            <input className="nx-input" autoFocus value={funnelModal.nome}
+              onChange={e=>setFunnelModal({ nome:e.target.value })}
+              onKeyDown={e=>e.key==='Enter' && createFunnel()}
+              placeholder="Ex: Funil de Recuperação" style={{ width:'100%',boxSizing:'border-box' }}/>
+            <div style={{ fontSize:10.5,color:C.muted,marginTop:6 }}>Começa com as etapas padrão — dá pra editar/reordenar depois.</div>
+            <div style={{ display:'flex',gap:8,justifyContent:'flex-end',marginTop:20 }}>
+              <button onClick={()=>setFunnelModal(null)} style={{ padding:'8px 16px',borderRadius:8,border:`1px solid ${C.border}`,background:'none',cursor:'pointer',fontSize:13 }}>Cancelar</button>
+              <button onClick={createFunnel} disabled={savingFunnel||!funnelModal.nome.trim()}
+                style={{ padding:'8px 18px',borderRadius:8,background:savingFunnel||!funnelModal.nome.trim()?C.muted:C.blue,color:'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:700 }}>
+                {savingFunnel?'Criando…':'Criar funil'}
+              </button>
             </div>
           </div>
         </div>
