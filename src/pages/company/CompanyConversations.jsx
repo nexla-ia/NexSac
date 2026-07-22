@@ -193,6 +193,8 @@ export default function CompanyConversations() {
   const [transferring, setTransferring] = useState(false)
   const [companyUsers, setCompanyUsers] = useState([]) // outros atendentes pra transferir
   const [tab, setTab]                 = useState('recepcao')
+  const [selectedIds, setSelectedIds] = useState(() => new Set()) // session_id → marcado (bulk actions)
+  const [bulkMarkingRead, setBulkMarkingRead] = useState(false)
   const [loadingContacts, setLoadingContacts] = useState(false)
   const [search, setSearch]           = useState('')
   const [tagFilter, setTagFilter]     = useState([])
@@ -893,6 +895,51 @@ export default function CompanyConversations() {
     window.addEventListener('keydown', handleGlobalKeydown)
     return () => window.removeEventListener('keydown', handleGlobalKeydown)
   }, [selected, closedMap, attendancesMap, isAdmin, session?.user?.email, saveContactModal, closeModal, transferModal, manageReasonsOpen])
+
+  // Limpa a seleção ao trocar de aba (seleção só faz sentido em Recepção/Setores)
+  useEffect(() => { setSelectedIds(new Set()) }, [tab])
+
+  function toggleSelect(sid, e) {
+    e?.stopPropagation()
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(sid) ? next.delete(sid) : next.add(sid)
+      return next
+    })
+  }
+
+  function toggleSelectAll(list) {
+    setSelectedIds(prev => prev.size === list.length && list.length > 0
+      ? new Set()
+      : new Set(list.map(c => c.session_id)))
+  }
+
+  // Marca em massa as conversas selecionadas como lidas
+  async function handleBulkMarkRead() {
+    const ids = [...selectedIds]
+    if (!ids.length || bulkMarkingRead) return
+    setBulkMarkingRead(true)
+    const now = new Date().toISOString()
+    setUnreadCounts(prev => {
+      const next = { ...prev }
+      ids.forEach(sid => { delete next[sid] })
+      return next
+    })
+    setReadsMap(prev => {
+      const next = { ...prev }
+      ids.forEach(sid => { next[sid] = now })
+      return next
+    })
+    if (session?.user?.email) {
+      await Promise.all(ids.map(sid => supabase.from('conversation_reads').upsert({
+        instancia: instance, session_id: sid, user_email: session.user.email, last_read_at: now,
+      }, { onConflict: 'instancia,session_id,user_email' })))
+    }
+    setBulkMarkingRead(false)
+    setSelectedIds(new Set())
+    setToast({ message: `${ids.length} conversa(s) marcada(s) como lida(s)`, color: '#16A34A' })
+    setTimeout(() => setToast(null), 3000)
+  }
 
   function handleSelectContact(c) {
     setSelected(c)
@@ -1621,6 +1668,37 @@ export default function CompanyConversations() {
   async function handleClose() {
     if (!reason || !closeModal) return
     setClosing(true)
+
+    // Modo em massa: fecha todas as conversas selecionadas de uma vez, com o mesmo motivo
+    if (closeModal.bulk) {
+      const ids = [...selectedIds]
+      const now = new Date().toISOString()
+      await Promise.all(ids.map(sid => supabase.from('conversations').insert({
+        session_id: sid, instancia: instance, reason, closed_at: now,
+      })))
+      await Promise.all(ids.map(sid => supabase.from('attendances').delete().eq('numero', sid).eq('instancia', instance)))
+      setClosedMap(prev => {
+        const next = { ...prev }
+        ids.forEach(sid => { next[sid] = reason })
+        return next
+      })
+      setAttendancesMap(prev => {
+        const next = { ...prev }
+        ids.forEach(sid => { delete next[sid] })
+        return next
+      })
+      if (selected && ids.includes(selected.session_id)) setSelected(null)
+      setSelectedIds(new Set())
+      setClosing(false)
+      setCloseModal(null)
+      setReason('')
+      setTab('finalizados')
+      const label = reasons.find(r => r.value === reason)?.label || reason
+      setToast({ message: `${ids.length} conversa(s) finalizada(s) — ${label}`, color: reasons.find(r => r.value === reason)?.color || '#16A34A' })
+      setTimeout(() => setToast(null), 3500)
+      return
+    }
+
     const { error } = await supabase.from('conversations').insert({
       session_id: closeModal.session_id,
       instancia: instance,
@@ -1723,6 +1801,55 @@ export default function CompanyConversations() {
           <div style={{ marginTop: 8 }}>
             <TagFilter instancia={instance} value={tagFilter} onChange={setTagFilter} />
           </div>
+          {tab !== 'finalizados' && filtered.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <input type="checkbox"
+                  checked={selectedIds.size > 0 && selectedIds.size === filtered.length}
+                  onChange={() => toggleSelectAll(filtered)}
+                />
+                Selecionar todas
+              </label>
+              {selectedIds.size > 0 && (
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#2563EB' }}>{selectedIds.size} selecionada(s)</span>
+              )}
+            </div>
+          )}
+          {selectedIds.size > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                onClick={handleBulkMarkRead}
+                disabled={bulkMarkingRead}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700,
+                  padding: '5px 10px', borderRadius: 8, border: '1px solid #BFDBFE', background: '#EFF6FF',
+                  color: '#2563EB', cursor: bulkMarkingRead ? 'default' : 'pointer', opacity: bulkMarkingRead ? 0.6 : 1,
+                }}
+              >
+                <MailOpen size={12} /> Marcar como lida
+              </button>
+              <button
+                onClick={() => { setCloseModal({ bulk: true, count: selectedIds.size }); setReason('') }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700,
+                  padding: '5px 10px', borderRadius: 8, border: '1px solid #BBF7D0', background: '#F0FDF4',
+                  color: '#16A34A', cursor: 'pointer',
+                }}
+              >
+                <CheckCircle2 size={12} /> Finalizar selecionadas
+              </button>
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600,
+                  padding: '5px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent',
+                  color: 'var(--text-muted)', cursor: 'pointer',
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="contacts-list-body">
@@ -1754,6 +1881,15 @@ export default function CompanyConversations() {
                   setContextMenu({ x: e.clientX, y: e.clientY, contact: c })
                 }}
               >
+                {tab !== 'finalizados' && (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(c.session_id)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => toggleSelect(c.session_id, e)}
+                    style={{ marginRight: 8, flexShrink: 0, cursor: 'pointer' }}
+                  />
+                )}
                 {(() => {
                   const contactPhoto = toImgSrc(saved?.photo) || toImgSrc(cliente?.foto)
                   return (
@@ -2967,9 +3103,11 @@ export default function CompanyConversations() {
           <div className="nx-card" style={{ width: '100%', maxWidth: 400 }}>
             <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>Finalizar conversa</div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>
+                  {closeModal.bulk ? `Finalizar ${closeModal.count} conversas` : 'Finalizar conversa'}
+                </div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                  {closeModal.phone} — qual foi o resultado?
+                  {closeModal.bulk ? 'Motivo aplicado a todas as selecionadas' : `${closeModal.phone} — qual foi o resultado?`}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

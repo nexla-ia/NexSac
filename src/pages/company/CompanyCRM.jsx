@@ -96,6 +96,8 @@ export default function CompanyCRM() {
   const [newForm, setNewForm]         = useState({ nome:'', phone:'', email:'', origem:'', temperatura:'morno', stage_id:'', observacoes:'' })
   const [saving, setSaving]           = useState(false)
   const [confirmDel, setConfirmDel]   = useState(null)
+  const [editingCardId, setEditingCardId] = useState(null) // edição inline do nome direto no card
+  const [editingCardName, setEditingCardName] = useState('')
 
   // ── Load ───────────────────────────────────────────────────────────────────
   async function load() {
@@ -369,6 +371,23 @@ export default function CompanyCRM() {
     await supabase.from('crm_contacts').update(changes).eq('id', id)
     setContacts(p => p.map(c => c.id===id ? {...c,...changes} : c))
     if (panel?.id === id) setPanel(p => ({...p,...changes}))
+  }
+
+  const TEMP_CYCLE = ['frio', 'morno', 'quente']
+  function cycleTemp(contact) {
+    const next = TEMP_CYCLE[(TEMP_CYCLE.indexOf(contact.temperatura) + 1) % TEMP_CYCLE.length]
+    patchContact(contact.id, { temperatura: next })
+  }
+
+  function startEditCardName(contact, e) {
+    e.stopPropagation()
+    setEditingCardId(contact.id)
+    setEditingCardName(contact.nome || '')
+  }
+  function commitEditCardName(contact) {
+    const v = editingCardName.trim()
+    setEditingCardId(null)
+    if (v !== (contact.nome || '')) patchContact(contact.id, { nome: v || null })
   }
 
   async function deleteContact(id) {
@@ -813,16 +832,43 @@ export default function CompanyCRM() {
                         }}>{initStr}</div>
 
                         <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontWeight:700, fontSize:12.5, color:C.navy, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                            {contact.nome || fmtPhone(contact.phone) || 'Sem nome'}
-                          </div>
+                          {editingCardId === contact.id ? (
+                            <input
+                              autoFocus
+                              value={editingCardName}
+                              onChange={e => setEditingCardName(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              onBlur={() => commitEditCardName(contact)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); commitEditCardName(contact) }
+                                if (e.key === 'Escape') { setEditingCardId(null) }
+                              }}
+                              placeholder="Nome do contato"
+                              style={{
+                                width:'100%', boxSizing:'border-box', fontWeight:700, fontSize:12.5,
+                                color:C.navy, border:`1px solid #93C5FD`, borderRadius:5,
+                                padding:'2px 5px', background:'#EFF6FF', outline:'none',
+                              }}
+                            />
+                          ) : (
+                            <div
+                              onClick={e => startEditCardName(contact, e)}
+                              title="Clique para editar o nome"
+                              style={{ fontWeight:700, fontSize:12.5, color:C.navy, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor:'text' }}
+                            >
+                              {contact.nome || fmtPhone(contact.phone) || 'Sem nome'}
+                            </div>
+                          )}
                           {contact.nome && (
                             <div style={{ fontSize:10.5, color:C.muted, marginTop:1 }}>{fmtPhone(contact.phone)}</div>
                           )}
                         </div>
 
-                        {/* Temperature dot */}
-                        <div title={temp.label} style={{ width:8,height:8,borderRadius:'50%',background:temp.dot,flexShrink:0,marginTop:3 }}/>
+                        {/* Temperature dot — clique cicla frio → morno → quente */}
+                        <div title={`${temp.label} (clique para mudar)`}
+                          onClick={e => { e.stopPropagation(); cycleTemp(contact) }}
+                          style={{ width:12,height:12,borderRadius:'50%', background:temp.dot, flexShrink:0, marginTop:2, cursor:'pointer', border:'2px solid #fff', boxShadow:`0 0 0 1px ${temp.dot}` }}
+                        />
                       </div>
 
                       {/* Tags row */}
