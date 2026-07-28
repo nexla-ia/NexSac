@@ -4,6 +4,25 @@
 
 export const UPDATES = [
   {
+    date: '2026-07-28',
+    title: 'Responder mensagem, localização, contato compartilhado e mais no Conversas/Grupos',
+    type: 'feature',
+    tags: ['Conversas', 'Grupos', 'Agenda', 'CRM', 'Financeiro'],
+    items: [
+      'Conversas: respondam (citando) qualquer mensagem — inclusive as de vocês — e vejam a citação destacada no balão de quem respondeu.',
+      'Conversas: colem um print ou imagem direto na caixa de digitar com Ctrl+V, sem precisar salvar o arquivo antes.',
+      'Conversas: mandem localização — botão novo pega o GPS de vocês e envia um link do Google Maps; colar um link do Maps também já funciona e aparece como cartão de localização, não como link cru.',
+      'Conversas: quando o cliente manda um contato do WhatsApp, ele aparece como cartãozinho com nome, telefone e botões "Conversar" e "Salvar" — em vez do texto cru do contato.',
+      'Conversas: lápis do lado do nome no topo da conversa abre a edição rapidinho, sem precisar ir no menu de contexto.',
+      'Pesquisar dentro da conversa (estilo WhatsApp), motivos de "Finalizar conversa" editáveis, e a correção da conversa "duplicada" pelo nono dígito continuam valendo — e agora com o fuso horário das mensagens corrigido pra bater certo mesmo pra quem acessa fora do horário de Brasília.',
+      'Grupos: chegaram junto responder/citar mensagem, colar imagem, enviar localização, contato compartilhado como cartão e editar mensagem enviada — tudo igual já tinha em Conversas.',
+      'Agenda: agora só avisamos o cliente automaticamente quando o agendamento é criado. Confirmar, cancelar ou remarcar não dispara mais mensagem sozinha — menos notificação repetida pro paciente a cada ajuste interno de vocês.',
+      'CRM: etapas do funil ficaram editáveis — nome, cor, ordem, prazo de alerta, criar e excluir etapa direto no board.',
+      'Financeiro: filtro "Vencidas" pra achar rápido só o que está atrasado, e o carregamento voltou a trazer todos os lançamentos mesmo passando de 1000 (antes, contas mais antigas somiam da lista).',
+      'Lembretes de agendamento: corrigido o bug que às vezes mandava o mesmo lembrete duas vezes.',
+    ],
+  },
+  {
     date: '2026-05-12',
     title: 'Nova identidade — NexSac com cara nova e tagline oficial',
     type: 'improvement',
