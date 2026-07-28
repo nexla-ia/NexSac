@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import EmojiPicker from 'emoji-picker-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileText, BellOff, Bell, ChevronRight, Loader2, Phone, X, MessageCircle, UserPlus, Check, Pencil, Search } from 'lucide-react'
+import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileText, BellOff, Bell, ChevronRight, Loader2, Phone, X, MessageCircle, UserPlus, Check, Pencil, Search, MapPin, Contact, Reply } from 'lucide-react'
 import { useContactTags, TagList, TagPicker, TagFilter, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import './Company.css'
@@ -50,7 +50,9 @@ function parseTs(row) {
   if (/^\d{2}\/\d{2}\/\d{4}/.test(raw)) {
     const [date, time] = raw.split(' ')
     const [d, m, y] = date.split('/')
-    return new Date(`${y}-${m}-${d}T${time || '00:00:00'}`).toISOString()
+    // horaLastMessage vem sempre em horário de Brasília (UTC-3, sem horário de
+    // verão desde 2019) — offset explícito pra não depender do fuso do navegador.
+    return new Date(`${y}-${m}-${d}T${time || '00:00:00'}-03:00`).toISOString()
   }
   return raw
 }
@@ -99,6 +101,32 @@ function detectMedia(b64) {
   return null
 }
 
+// Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em vCard puro
+function detectVCard(text) {
+  if (!text || !text.includes('BEGIN:VCARD')) return null
+  const nameMatch = text.match(/FN:(.+)/i) || text.match(/N:(.+)/i)
+  const telMatch = text.match(/TEL[^:]*:([+()\d\s-]+)/i)
+  return {
+    name: (nameMatch?.[1] || 'Contato').trim(),
+    phone: telMatch ? telMatch[1].replace(/\D/g, '') : null,
+  }
+}
+
+// Localização — link do Google Maps (colado manualmente ou gerado pelo botão de GPS)
+const MAPS_URL_REGEX = /(https?:\/\/(?:www\.)?google\.com\/maps[^\s]*|https?:\/\/maps\.app\.goo\.gl\/[^\s]+)/i
+function detectLocation(text) {
+  if (!text) return null
+  const m = text.match(MAPS_URL_REGEX)
+  return m ? m[1] : null
+}
+
+function fmtPhoneDisplay(digits) {
+  const d = (digits || '').replace(/\D/g, '')
+  if (d.length >= 12) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9,13)}`
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
+  return digits || ''
+}
+
 export default function CompanyGroups() {
   const { session } = useAuth()
   const navigate = useNavigate()
@@ -123,6 +151,10 @@ export default function CompanyGroups() {
   const [recordedAudio, setRecordedAudio] = useState(null)
   const [recordTime, setRecordTime] = useState(0)
   const [attachedFile, setAttachedFile] = useState(null)
+  const [editingMsgId, setEditingMsgId] = useState(null)
+  const [editingText, setEditingText] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [replyTo, setReplyTo] = useState(null)
   const [mutedGroups, setMutedGroupsState] = useState(() => getMutedGroups(instance))
   const [contextMenu, setContextMenu] = useState(null) // { x, y, group }
   const [tagFilter, setTagFilter] = useState([])
@@ -335,7 +367,7 @@ export default function CompanyGroups() {
     setMessages([])
     setHasMoreMsgs(false)
     supabase.from(CONV_TABLE)
-      .select('id, numero, nome, type, mensagem, base64, "horaLastMessage", created_at')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
       .eq('instancia', instance)
       .eq('idgrupo', selected.idgrupo)
       .order('id', { ascending: false })
@@ -440,13 +472,10 @@ export default function CompanyGroups() {
 
   function discardAudio() { setRecordedAudio(null); setRecordTime(0) }
 
-  async function handlePickFile(e) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
+  async function fileToAttachment(file) {
     const isVideo = file.type.startsWith('video/')
     const MAX = isVideo ? 50 * 1024 * 1024 : 15 * 1024 * 1024
-    if (file.size > MAX) return
+    if (file.size > MAX) return null
     const buf = await file.arrayBuffer()
     const bytes = new Uint8Array(buf)
     let bin = ''
@@ -458,15 +487,51 @@ export default function CompanyGroups() {
       : file.type === 'application/pdf' ? 'pdf'
       : file.type.startsWith('video/') ? 'video'
       : 'file'
-    setAttachedFile({ base64, mime: file.type || 'application/octet-stream', name: file.name, size: file.size, kind })
+    return { base64, mime: file.type || 'application/octet-stream', name: file.name, size: file.size, kind }
+  }
+
+  async function handlePickFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const att = await fileToAttachment(file)
+    if (att) setAttachedFile(att)
+  }
+
+  // Cola print/imagem direto na caixa (Ctrl+V), igual WhatsApp Web
+  async function handleComposerPaste(e) {
+    if (attachedFile) return
+    const items = e.clipboardData?.items
+    if (!items?.length) return
+    const imgItem = [...items].find(it => it.type.startsWith('image/'))
+    if (!imgItem) return
+    e.preventDefault()
+    const raw = imgItem.getAsFile()
+    if (!raw) return
+    const file = new File([raw], raw.name || `print-${Date.now()}.png`, { type: raw.type })
+    const att = await fileToAttachment(file)
+    if (att) setAttachedFile(att)
   }
 
   function discardFile() { setAttachedFile(null) }
 
-  async function handleSend() {
+  // Envia a localização atual (GPS) como link do Google Maps
+  function handleShareLocation() {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords
+        handleSend(`📍 Localização: https://www.google.com/maps?q=${latitude},${longitude}`)
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 8000 }
+    )
+  }
+
+  async function handleSend(overrideText) {
     let audio = recordedAudio
     if (recording) audio = await stopRecording({ persistPreview: false })
-    const text = msgText.trim()
+    const text = (overrideText ?? msgText).trim()
     if (!text && !audio && !attachedFile) return
     if (!selected || sending) return
     setSending(true)
@@ -479,10 +544,12 @@ export default function CompanyGroups() {
         ? (text ? `${filePrefix}\n${text}` : filePrefix)
         : text
     const mediaBase64 = audio?.base64 || attachedFile?.base64 || null
+    const quoting = replyTo
     setMsgText('')
     setRecordedAudio(null)
     setRecordTime(0)
     setAttachedFile(null)
+    setReplyTo(null)
     try {
       const hora = new Date().toISOString()
       await supabase.from(CONV_TABLE).insert({
@@ -496,6 +563,8 @@ export default function CompanyGroups() {
         nome: session?.user?.name || null,
         horaLastMessage: hora,
         created_at: hora,
+        quoted_id_mensagem: quoting?.id_mensagem || null,
+        quoted_text: quoting ? (quoting.mensagem || '').slice(0, 200) : null,
       })
       if (/@\d+/.test(text)) {
         // Mensagem com menção → só para infogrupo
@@ -539,11 +608,54 @@ export default function CompanyGroups() {
             sender_email: session?.user?.email,
             company: session?.company?.name,
             ai_enabled: false,
+            ...(quoting ? {
+              quoted_id: quoting.id_mensagem || null,
+              quoted_text: quoting.mensagem || '',
+              quoted_fromMe: (quoting.type || '').toLowerCase() !== 'cliente',
+            } : {}),
           }),
         }).catch(e => console.warn('webhook grupo:', e))
       }
     } finally {
       setSending(false)
+    }
+  }
+
+  async function handleSaveEditGroup(msg) {
+    const newText = editingText.trim()
+    if (!newText || savingEdit) return
+    setSavingEdit(true)
+    try {
+      const { data: fresh } = await supabase
+        .from(CONV_TABLE)
+        .select('id_mensagem')
+        .eq('id', msg.id)
+        .maybeSingle()
+      const id_mensagem = fresh?.id_mensagem || msg.id_mensagem
+
+      const res = await fetch('https://n8n.nexladesenvolvimento.com.br/webhook/envioNexlaeditar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: msg.id,
+          id_mensagem,
+          message: newText,
+          idgrupo: selected?.idgrupo,
+          numero: instanceOwner || selected?.idgrupo,
+          instancia: instance,
+          api_instancia: apiInstancia,
+          sender_name: session?.user?.name,
+          sender_email: session?.user?.email,
+        }),
+      })
+      if (!res.ok) throw new Error('status ' + res.status)
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, mensagem: newText } : m))
+      setEditingMsgId(null)
+      setEditingText('')
+    } catch (e) {
+      console.warn('editar mensagem grupo:', e)
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -554,7 +666,7 @@ export default function CompanyGroups() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data } = await supabase.from(CONV_TABLE)
-      .select('id, numero, nome, type, mensagem, base64, "horaLastMessage", created_at')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
       .eq('instancia', instance)
       .eq('idgrupo', selected.idgrupo)
       .lt('id', oldestId)
@@ -591,7 +703,7 @@ export default function CompanyGroups() {
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const oldestId = messages[0]?.id
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, numero, nome, type, mensagem, base64, "horaLastMessage", created_at')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
       .eq('instancia', instance)
       .eq('idgrupo', selected.idgrupo)
       .gte('id', dbId)
@@ -623,7 +735,7 @@ export default function CompanyGroups() {
     const esc = q.replace(/[\\%_]/g, s => '\\' + s)
     const timer = setTimeout(() => {
       supabase.from(CONV_TABLE)
-        .select('id, numero, nome, type, mensagem, "horaLastMessage", created_at')
+        .select('id, id_mensagem, numero, nome, type, mensagem, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
         .eq('instancia', instance)
         .eq('idgrupo', selected.idgrupo)
         .ilike('mensagem', `%${esc}%`)
@@ -1092,10 +1204,15 @@ export default function CompanyGroups() {
                 const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
                 const fileLine = fileLineMatch?.[1] || null
                 const isPlaceholder = !!fileLine
-                const displayContent = isPlaceholder ? (fileLineMatch[3]?.trim() || '') : rawContent
+                const vcard = !media ? detectVCard(rawContent) : null
+                const locationUrl = !media && !vcard ? detectLocation(rawContent) : null
+                const displayContent = (vcard || locationUrl) ? '' : isPlaceholder ? (fileLineMatch[3]?.trim() || '') : rawContent
                 const isLongText = !isPlaceholder && displayContent.length > TEXT_LIMIT
                 const isExpanded = expandedMsgIds.has(msg.id)
                 const shownText = isLongText && !isExpanded ? displayContent.slice(0, TEXT_LIMIT).trimEnd() + '…' : displayContent
+                const quotedMsg = msg.quoted_id_mensagem
+                  ? messages.find(m => m.id_mensagem === msg.quoted_id_mensagem)
+                  : null
                 return (
                   <div key={msg.id} className={`msg-row ${isAtendente ? 'client' : 'ai'}`}
                     ref={el => { if (el) msgRefs.current[msg.id] = el }}
@@ -1111,6 +1228,86 @@ export default function CompanyGroups() {
                         </span>
                       )}
                       <div className="msg-bubble" style={{ maxWidth: '100%', wordBreak: 'break-word', padding: media?.type === 'image' ? 4 : undefined }}>
+                        {(quotedMsg || msg.quoted_text) && (
+                          <div
+                            onClick={() => quotedMsg && scrollToMessage(quotedMsg.id)}
+                            title={quotedMsg ? 'Ir para a mensagem citada' : undefined}
+                            style={{
+                              display: 'flex', flexDirection: 'column', gap: 1,
+                              borderLeft: `3px solid ${isAtendente ? 'rgba(255,255,255,0.6)' : '#4F46E5'}`,
+                              background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F1F5F9',
+                              borderRadius: 6, padding: '5px 9px', marginBottom: 6,
+                              cursor: quotedMsg ? 'pointer' : 'default',
+                              maxWidth: 260,
+                            }}
+                          >
+                            <span style={{ fontSize: 11, fontWeight: 700, color: isAtendente ? '#fff' : '#4F46E5' }}>
+                              {quotedMsg ? senderLabel(quotedMsg) : 'Mensagem citada'}
+                            </span>
+                            <span style={{
+                              fontSize: 12, color: isAtendente ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {(quotedMsg?.mensagem || msg.quoted_text || '').slice(0, 120) || '(mídia)'}
+                            </span>
+                          </div>
+                        )}
+                        {vcard && (
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F8FAFC',
+                            border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#E2E8F0'}`,
+                            borderRadius: 8, padding: '10px 14px', minWidth: 200,
+                          }}>
+                            <div style={{
+                              width: 32, height: 32, borderRadius: '50%',
+                              background: isAtendente ? 'rgba(255,255,255,0.2)' : '#EEF2FF',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              color: isAtendente ? '#fff' : '#4F46E5', flexShrink: 0,
+                            }}>
+                              <Contact size={16} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 700, color: isAtendente ? '#fff' : '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {vcard.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: isAtendente ? 'rgba(255,255,255,0.75)' : '#6B7280', fontFamily: 'monospace' }}>
+                                {vcard.phone ? fmtPhoneDisplay(vcard.phone) : 'Contato compartilhado'}
+                              </div>
+                              {vcard.phone && (
+                                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                                  <a href={`https://wa.me/${vcard.phone}`} target="_blank" rel="noreferrer"
+                                    style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6, textDecoration: 'none', background: '#25D366', color: '#fff' }}>Conversar</a>
+                                  <button
+                                    onClick={() => handleSaveMember(vcard.phone)}
+                                    style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', background: isAtendente ? 'rgba(255,255,255,0.9)' : '#EEF2FF', color: isAtendente ? '#4F46E5' : '#4F46E5' }}>Salvar</button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {!vcard && locationUrl && (
+                          <a href={locationUrl} target="_blank" rel="noreferrer"
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none',
+                              background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F8FAFC',
+                              border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#E2E8F0'}`,
+                              borderRadius: 8, padding: '10px 14px', minWidth: 200,
+                            }}>
+                            <div style={{
+                              width: 32, height: 32, borderRadius: 6,
+                              background: isAtendente ? 'rgba(255,255,255,0.2)' : '#FEF2F2',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              color: isAtendente ? '#fff' : '#DC2626', flexShrink: 0,
+                            }}>
+                              <MapPin size={17} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 700, color: isAtendente ? '#fff' : '#111827' }}>Localização compartilhada</div>
+                              <div style={{ fontSize: 11, color: isAtendente ? 'rgba(255,255,255,0.75)' : '#6B7280' }}>Abrir no Google Maps</div>
+                            </div>
+                          </a>
+                        )}
                         {media?.type === 'audio' && (
                           <audio controls src={media.src} style={{ maxWidth: 240, height: 32 }} />
                         )}
@@ -1148,7 +1345,39 @@ export default function CompanyGroups() {
                             </div>
                           )
                         })()}
-                        {!media && displayContent && (
+                        {isAtendente && editingMsgId === msg.id ? (
+                          <div>
+                            <textarea
+                              autoFocus
+                              value={editingText}
+                              onChange={e => setEditingText(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSaveEditGroup(msg) }
+                                if (e.key === 'Escape') { setEditingMsgId(null); setEditingText('') }
+                              }}
+                              style={{
+                                width: '100%', minHeight: 44, maxHeight: 120, boxSizing: 'border-box',
+                                background: 'rgba(255,255,255,0.15)',
+                                border: '1.5px solid rgba(255,255,255,0.45)',
+                                borderRadius: 8, padding: '8px 10px',
+                                color: '#fff', fontSize: 13.5,
+                                lineHeight: 1.5, resize: 'none',
+                                fontFamily: 'inherit', outline: 'none',
+                              }}
+                            />
+                            <div style={{ display: 'flex', gap: 6, marginTop: 7, justifyContent: 'flex-end' }}>
+                              <button
+                                onClick={() => { setEditingMsgId(null); setEditingText('') }}
+                                style={{ fontSize: 11, fontWeight: 600, padding: '4px 11px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.3)', background: 'transparent', color: 'rgba(255,255,255,0.8)', cursor: 'pointer' }}
+                              >Cancelar</button>
+                              <button
+                                onClick={() => handleSaveEditGroup(msg)}
+                                disabled={savingEdit}
+                                style={{ fontSize: 11, fontWeight: 700, padding: '4px 13px', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,0.92)', color: '#4F46E5', cursor: savingEdit ? 'default' : 'pointer', opacity: savingEdit ? 0.65 : 1 }}
+                              >{savingEdit ? 'Salvando...' : 'Salvar'}</button>
+                            </div>
+                          </div>
+                        ) : (!media && !vcard && !locationUrl && displayContent && (
                           <>
                             <span style={{ whiteSpace: 'pre-wrap' }}>
                               {renderTextWithLinks(shownText, {
@@ -1175,11 +1404,31 @@ export default function CompanyGroups() {
                               </button>
                             )}
                           </>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                          {formatTime(ts)}
+                        </span>
+                        {editingMsgId !== msg.id && (
+                          <button
+                            onClick={() => setReplyTo(msg)}
+                            title="Responder citando"
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex', opacity: 0.6 }}
+                          >
+                            <Reply size={12} />
+                          </button>
+                        )}
+                        {isAtendente && editingMsgId !== msg.id && !media && msg.mensagem !== '🚫 Mensagem apagada' && (
+                          <button
+                            onClick={() => { setEditingMsgId(msg.id); setEditingText(displayContent) }}
+                            title="Editar mensagem"
+                            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex', opacity: 0.6 }}
+                          >
+                            <Pencil size={12} />
+                          </button>
                         )}
                       </div>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
-                        {formatTime(ts)}
-                      </span>
                     </div>
                   </div>
                 )
@@ -1189,6 +1438,24 @@ export default function CompanyGroups() {
 
             {/* Barra de envio */}
             <div style={{ padding: '8px 16px 12px', borderTop: '1px solid var(--border)' }}>
+              {/* Preview: respondendo a mensagem */}
+              {replyTo && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  background: '#F1F5F9', border: '1px solid var(--border)', borderLeft: '3px solid #4F46E5',
+                  borderRadius: 8, padding: '6px 12px', marginBottom: 8,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#4F46E5' }}>Respondendo {senderLabel(replyTo)}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {(replyTo.mensagem || '').slice(0, 120) || '(mídia)'}
+                    </div>
+                  </div>
+                  <button onClick={() => setReplyTo(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4, display: 'flex' }}>
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
               {/* Preview: arquivo anexado */}
               {attachedFile && (
                 <div style={{
@@ -1335,6 +1602,7 @@ export default function CompanyGroups() {
                     if (e.key === 'Escape') { setMentionOpen(false); return }
                     if (e.key === 'Enter' && !e.shiftKey) handleSend()
                   }}
+                  onPaste={handleComposerPaste}
                   disabled={sending || recording}
                 />
                 <input ref={fileInputRef} type="file" accept="image/*,application/pdf,video/*" style={{ display: 'none' }} onChange={handlePickFile} />
@@ -1370,6 +1638,14 @@ export default function CompanyGroups() {
                       style={{ padding: '0 14px', flexShrink: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, color: '#6B7280', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
                     >
                       <Mic size={15} />
+                    </button>
+                    <button
+                      onClick={handleShareLocation}
+                      title="Enviar minha localização atual"
+                      disabled={sending}
+                      style={{ padding: '0 14px', flexShrink: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, color: '#6B7280', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                    >
+                      <MapPin size={15} />
                     </button>
                   </>
                 )}

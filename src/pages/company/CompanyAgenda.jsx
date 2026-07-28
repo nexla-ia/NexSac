@@ -499,8 +499,6 @@ export default function CompanyAgenda() {
       reminder_offsets: (a.reminders || []).map(r => r.offset_minutes),
       date: dateStr,
       time: timeStr,
-      _prevStatus: a.status,
-      _prevStartsAt: a.starts_at,
     })
     setApptErr('')
     setPatientHistory([])
@@ -633,8 +631,6 @@ export default function CompanyAgenda() {
     payload.paid_at = paidAt
 
     const isNew = !apptModal.id
-    const prevStatus = apptModal._prevStatus
-    const prevStartsAt = apptModal._prevStartsAt
     const { error } = isNew
       ? await supabase.from('appointments').insert(payload)
       : await supabase.from('appointments').update(payload).eq('id', apptModal.id)
@@ -665,11 +661,10 @@ export default function CompanyAgenda() {
       const dateStr   = startsAt.toLocaleString('pt-BR',
         { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
       const firstName = (payload.contact_nome || '').split(' ')[0] || 'tudo bem'
-      const dateChanged = !isNew && prevStartsAt &&
-        new Date(prevStartsAt).getTime() !== startsAt.getTime()
-      const statusChanged = !isNew && prevStatus && prevStatus !== payload.status
 
-      // Texto patient-friendly por tipo de evento
+      // Só notifica automaticamente na CRIAÇÃO do agendamento — confirmar, cancelar
+      // e remarcar não disparam mais mensagem sozinhos (evita ficar avisando o
+      // cliente a cada ajuste interno). Mensagem customizada continua manual.
       let patientMsg = null
       if (useCustomMsg && customMsg.trim()) {
         patientMsg = customMsg.trim()
@@ -678,16 +673,7 @@ export default function CompanyAgenda() {
         patientMsg = proc?.reminder_message?.trim()
           ? proc.reminder_message.replace(/\{nome\}/gi, firstName).replace(/\{data\}/gi, dateStr)
           : `Olá ${firstName}! 📅 Seu agendamento foi marcado para *${dateStr}*. Qualquer dúvida é só responder aqui!`
-      } else if (statusChanged && payload.status === 'cancelado') {
-        patientMsg = `Olá ${firstName}, infelizmente seu agendamento de ${dateStr} foi cancelado. Em caso de dúvidas, entre em contato.`
-      } else if (statusChanged && payload.status === 'confirmado') {
-        patientMsg = `Olá ${firstName}! ✅ Seu agendamento de *${dateStr}* está confirmado. Até lá!`
-      } else if (dateChanged && payload.status !== 'cancelado') {
-        const prevStr = new Date(prevStartsAt).toLocaleString('pt-BR',
-          { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        patientMsg = `Olá ${firstName}! ✏️ Seu agendamento foi remarcado de ${prevStr} para *${dateStr}*. Se não puder, me avisa por aqui!`
       }
-      // concluído / faltou: nenhum envio (são eventos pós-consulta)
 
       if (patientMsg) {
         // 1) Loga no chat interno (aparece na thread de Conversas)

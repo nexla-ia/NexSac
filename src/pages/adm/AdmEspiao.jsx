@@ -15,7 +15,9 @@ function parseTimestamp(val) {
   if (/^\d{2}\/\d{2}\/\d{4}/.test(val)) {
     const [date, time] = val.split(' ')
     const [d, m, y] = date.split('/')
-    return new Date(`${y}-${m}-${d}T${time || '00:00:00'}`).toISOString()
+    // horaLastMessage vem em horário de Brasília (UTC-3) — offset explícito
+    // pra não depender do fuso do navegador de quem está olhando.
+    return new Date(`${y}-${m}-${d}T${time || '00:00:00'}-03:00`).toISOString()
   }
   return val
 }

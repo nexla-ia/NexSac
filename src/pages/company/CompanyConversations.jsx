@@ -4,7 +4,7 @@ import EmojiPicker from 'emoji-picker-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2 } from 'lucide-react'
+import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2, MapPin, Contact } from 'lucide-react'
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import { canonSession, numeroVariants } from '../../lib/phone'
@@ -14,6 +14,13 @@ const CONV_TABLE = 'mensagens_geral'
 
 function formatPhone(val) {
   return (val || '').replace(/@.*$/, '')
+}
+
+function fmtPhoneDisplay(digits) {
+  const d = (digits || '').replace(/\D/g, '')
+  if (d.length >= 12) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9,13)}`
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
+  return digits || ''
 }
 
 function getMessageContent(row) {
@@ -27,7 +34,11 @@ function parseTimestamp(val) {
   if (/^\d{2}\/\d{2}\/\d{4}/.test(val)) {
     const [date, time] = val.split(' ')
     const [d, m, y] = date.split('/')
-    return new Date(`${y}-${m}-${d}T${time || '00:00:00'}`).toISOString()
+    // horaLastMessage vem sempre em horário de Brasília (UTC-3, sem horário de
+    // verão desde 2019). Sem o offset explícito, "new Date(...)" interpretava
+    // a string no fuso do navegador de quem está olhando — errado pra qualquer
+    // um fora do UTC-3.
+    return new Date(`${y}-${m}-${d}T${time || '00:00:00'}-03:00`).toISOString()
   }
   return val
 }
@@ -67,6 +78,26 @@ function detectMedia(b64) {
     }
   } catch {}
   return null
+}
+
+// Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em
+// formato vCard puro (BEGIN:VCARD...END:VCARD) independente do que o n8n faz com o resto.
+function detectVCard(text) {
+  if (!text || !text.includes('BEGIN:VCARD')) return null
+  const nameMatch = text.match(/FN:(.+)/i) || text.match(/N:(.+)/i)
+  const telMatch = text.match(/TEL[^:]*:([+()\d\s-]+)/i)
+  return {
+    name: (nameMatch?.[1] || 'Contato').trim(),
+    phone: telMatch ? telMatch[1].replace(/\D/g, '') : null,
+  }
+}
+
+// Localização — link do Google Maps (colado manualmente ou gerado pelo botão de GPS)
+const MAPS_URL_REGEX = /(https?:\/\/(?:www\.)?google\.com\/maps[^\s]*|https?:\/\/maps\.app\.goo\.gl\/[^\s]+)/i
+function detectLocation(text) {
+  if (!text) return null
+  const m = text.match(MAPS_URL_REGEX)
+  return m ? m[1] : null
 }
 
 function toImgSrc(val) {
@@ -1203,16 +1234,13 @@ export default function CompanyConversations() {
     setRecordTime(0)
   }
 
-  async function handlePickFile(e) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
+  async function fileToAttachment(file) {
     const isVideo = file.type.startsWith('video/')
     const MAX = isVideo ? 50 * 1024 * 1024 : 15 * 1024 * 1024
     if (file.size > MAX) {
       setToast({ message: isVideo ? 'Vídeo muito grande (máx 50 MB)' : 'Arquivo muito grande (máx 15 MB)', color: '#DC2626' })
       setTimeout(() => setToast(null), 3000)
-      return
+      return null
     }
     const buf = await file.arrayBuffer()
     const bytes = new Uint8Array(buf)
@@ -1226,11 +1254,54 @@ export default function CompanyConversations() {
       : file.type === 'application/pdf' ? 'pdf'
       : file.type.startsWith('video/') ? 'video'
       : 'file'
-    setAttachedFile({ base64, mime: file.type || 'application/octet-stream', name: file.name, size: file.size, kind })
+    return { base64, mime: file.type || 'application/octet-stream', name: file.name, size: file.size, kind }
+  }
+
+  async function handlePickFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const att = await fileToAttachment(file)
+    if (att) setAttachedFile(att)
+  }
+
+  // Cola print/imagem direto na caixa (Ctrl+V), igual WhatsApp Web
+  async function handleComposerPaste(e) {
+    if (!canRespond(selected) || attachedFile) return
+    const items = e.clipboardData?.items
+    if (!items?.length) return
+    const imgItem = [...items].find(it => it.type.startsWith('image/'))
+    if (!imgItem) return
+    e.preventDefault()
+    const raw = imgItem.getAsFile()
+    if (!raw) return
+    const file = new File([raw], raw.name || `print-${Date.now()}.png`, { type: raw.type })
+    const att = await fileToAttachment(file)
+    if (att) setAttachedFile(att)
   }
 
   function discardFile() {
     setAttachedFile(null)
+  }
+
+  // Envia a localização atual (GPS) como link do Google Maps
+  function handleShareLocation() {
+    if (!navigator.geolocation) {
+      setToast({ message: 'Geolocalização não suportada neste navegador.', color: '#DC2626' })
+      setTimeout(() => setToast(null), 3000)
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords
+        handleSend(`📍 Localização: https://www.google.com/maps?q=${latitude},${longitude}`)
+      },
+      () => {
+        setToast({ message: 'Não foi possível obter sua localização.', color: '#DC2626' })
+        setTimeout(() => setToast(null), 3000)
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    )
   }
 
   // Helper: usuário atual pode responder essa conversa?
@@ -1244,7 +1315,7 @@ export default function CompanyConversations() {
     return att.attendant_email === session?.user?.email
   }
 
-  async function handleSend() {
+  async function handleSend(overrideText) {
     if (sending || !selected) return
     if (!canRespond(selected)) {
       const att = attendancesMap[selected.session_id]
@@ -1259,7 +1330,8 @@ export default function CompanyConversations() {
     if (recording) {
       audio = await stopRecording({ persistPreview: false })
     }
-    if (!msgText.trim() && !audio && !attachedFile) return
+    const pendingText = overrideText ?? msgText
+    if (!pendingText.trim() && !audio && !attachedFile) return
     setSending(true)
     try {
       // Auto-assume se ainda não está atribuído a ninguém
@@ -1277,7 +1349,7 @@ export default function CompanyConversations() {
         setAttendancesMap(prev => ({ ...prev, [selected.session_id]: newAtt }))
         setTab('meu-setor')
       }
-      const text = msgText.trim()
+      const text = pendingText.trim()
       const file = attachedFile
       const quoting = replyTo
       setMsgText('')
@@ -2030,11 +2102,22 @@ export default function CompanyConversations() {
                       )
                     })()}
                     <div style={{ flex: 1 }}>
-                      <div
-                        style={{ fontWeight: 500, fontSize: 14, color: 'var(--text-primary)', cursor: saved ? 'pointer' : 'default' }}
-                        onClick={() => saved && navigate(`/painel/contatos/${saved.id}`)}
-                      >
-                        {headerName || selected.phone}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div
+                          style={{ fontWeight: 500, fontSize: 14, color: 'var(--text-primary)', cursor: saved ? 'pointer' : 'default' }}
+                          onClick={() => saved && navigate(`/painel/contatos/${saved.id}`)}
+                        >
+                          {headerName || selected.phone}
+                        </div>
+                        <button
+                          onClick={() => setSaveContactModal(saved
+                            ? { id: saved.id, numero: cleanNum, nome: saved.nome || '', notes: saved.notes || '' }
+                            : { numero: cleanNum, nome: '', notes: '' })}
+                          title="Editar nome do contato"
+                          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2, display: 'flex', opacity: 0.6 }}
+                        >
+                          <Pencil size={12} />
+                        </button>
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                         {headerName && <span style={{ fontFamily: 'monospace' }}>{selected.phone}</span>}
@@ -2424,7 +2507,9 @@ export default function CompanyConversations() {
                         // PDF e imagem nunca mostram texto junto — nem legenda no nosso padrão
                         // (📄 arquivo\nlegenda) nem texto solto que veio com a mídia (cliente/atendente)
                         const suppressCaption = media?.type === 'pdf' || media?.type === 'image'
-                        const displayContent = suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
+                        const vcard = !media ? detectVCard(rawContent) : null
+                        const locationUrl = !media && !vcard ? detectLocation(rawContent) : null
+                        const displayContent = (vcard || locationUrl) ? '' : suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
                         const hasOnlyMedia = media && !displayContent
                         const isLongText = !isPlaceholder && displayContent.length > TEXT_LIMIT
                         const isExpanded = expandedMsgIds.has(msg.id)
@@ -2539,6 +2624,70 @@ export default function CompanyConversations() {
                                   <div style={{ fontSize: 11, color: '#6B7280' }}>Vídeo enviado</div>
                                 </div>
                               </div>
+                            )}
+                            {vcard && (
+                              <div style={{
+                                display: 'flex', alignItems: 'center', gap: 10,
+                                background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F8FAFC',
+                                border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#E2E8F0'}`,
+                                borderRadius: 8, padding: '10px 14px', minWidth: 220,
+                              }}>
+                                <div style={{
+                                  width: 36, height: 36, borderRadius: '50%',
+                                  background: isAtendente ? 'rgba(255,255,255,0.2)' : '#EFF6FF',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  color: isAtendente ? '#fff' : '#2563EB', flexShrink: 0,
+                                }}>
+                                  <Contact size={17} />
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12.5, fontWeight: 700, color: isAtendente ? '#fff' : '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {vcard.name}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: isAtendente ? 'rgba(255,255,255,0.75)' : '#6B7280', fontFamily: 'monospace' }}>
+                                    {vcard.phone ? fmtPhoneDisplay(vcard.phone) : 'Contato compartilhado'}
+                                  </div>
+                                  {vcard.phone && (
+                                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                                      <a href={`https://wa.me/${vcard.phone}`} target="_blank" rel="noreferrer"
+                                        style={{
+                                          fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6,
+                                          textDecoration: 'none', background: '#25D366', color: '#fff',
+                                        }}>Conversar</a>
+                                      <button
+                                        onClick={() => setSaveContactModal({ numero: vcard.phone, nome: vcard.name, notes: '' })}
+                                        style={{
+                                          fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6, border: 'none',
+                                          cursor: 'pointer',
+                                          background: isAtendente ? 'rgba(255,255,255,0.9)' : '#EFF6FF',
+                                          color: isAtendente ? '#16A34A' : '#2563EB',
+                                        }}>Salvar</button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {!vcard && locationUrl && (
+                              <a href={locationUrl} target="_blank" rel="noreferrer"
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none',
+                                  background: isAtendente ? 'rgba(255,255,255,0.14)' : '#F8FAFC',
+                                  border: `1px solid ${isAtendente ? 'rgba(255,255,255,0.3)' : '#E2E8F0'}`,
+                                  borderRadius: 8, padding: '10px 14px', minWidth: 220,
+                                }}>
+                                <div style={{
+                                  width: 36, height: 36, borderRadius: 6,
+                                  background: isAtendente ? 'rgba(255,255,255,0.2)' : '#FEF2F2',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  color: isAtendente ? '#fff' : '#DC2626', flexShrink: 0,
+                                }}>
+                                  <MapPin size={18} />
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12.5, fontWeight: 700, color: isAtendente ? '#fff' : '#111827' }}>Localização compartilhada</div>
+                                  <div style={{ fontSize: 11, color: isAtendente ? 'rgba(255,255,255,0.75)' : '#6B7280' }}>Abrir no Google Maps</div>
+                                </div>
+                              </a>
                             )}
                             {isAtendente && editingMsgId === msg.id ? (
                               <div>
@@ -2820,6 +2969,7 @@ export default function CompanyConversations() {
                     value={msgText}
                     onChange={e => setMsgText(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                    onPaste={handleComposerPaste}
                     disabled={sending || recording || !canRespond(selected)}
                   />
                   <input
@@ -2880,6 +3030,21 @@ export default function CompanyConversations() {
                         }}
                       >
                         <Mic size={15} />
+                      </button>
+                      <button
+                        onClick={handleShareLocation}
+                        title="Enviar minha localização atual"
+                        disabled={!canRespond(selected) || sending}
+                        style={{
+                          padding: '0 14px', flexShrink: 0,
+                          background: '#fff', border: '1px solid var(--border)',
+                          borderRadius: 8, color: '#6B7280',
+                          cursor: canRespond(selected) ? 'pointer' : 'not-allowed',
+                          opacity: canRespond(selected) ? 1 : 0.45,
+                          display: 'inline-flex', alignItems: 'center',
+                        }}
+                      >
+                        <MapPin size={15} />
                       </button>
                     </>
                   )}

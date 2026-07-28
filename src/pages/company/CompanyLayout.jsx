@@ -177,12 +177,12 @@ export default function CompanyLayout() {
   ]
 
   const gestaoLinks = [
-    ...(mod('contatos') ? [{ to: '/painel/contatos', icon: Contact2, label: 'Contatos' }] : []),
+    ...(mod('contatos') ? [{ to: '/painel/contatos', icon: Contact2, label: 'Pacientes' }] : []),
     ...(mod('agenda') ? [{ to: '/painel/agenda', icon: Calendar, label: 'Agenda' }] : []),
     ...(mod('kanban') ? [{ to: '/painel/atividades', icon: Kanban, label: 'Kanban' }] : []),
-    ...(isAdmin && mod('crm') ? [{ to: '/painel/crm', icon: GitMerge, label: 'CRM' }] : []),
     ...(isAdmin && mod('financeiro') ? [{ to: '/painel/financeiro', icon: DollarSign, label: 'Financeiro' }] : []),
-    ...(isAdmin && mod('catalogo') ? [{ to: '/painel/catalogo', icon: Package, label: 'Catálogo de Serviços' }] : []),
+    ...(isAdmin && mod('catalogo') ? [{ to: '/painel/catalogo', icon: Package, label: 'Catálogo Clínico' }] : []),
+    ...(isAdmin && mod('crm') ? [{ to: '/painel/crm', icon: GitMerge, label: 'CRM' }] : []),
   ]
 
   const analiseLinks = [
@@ -190,7 +190,7 @@ export default function CompanyLayout() {
   ]
 
   const contaAjudaLinks = [
-    ...(isAdmin ? [{ to: '/painel/admin', icon: Settings2, label: 'Administração' }] : []),
+    ...(isAdmin ? [{ to: '/painel/admin', icon: Settings2, label: 'Configuração' }] : []),
     { to: '/painel/seguranca', icon: ShieldCheck,   label: 'Segurança' },
     { to: '/painel/tutorial', icon: GraduationCap, label: 'Tutorial' },
     { to: '/painel/novidades', icon: Sparkles,      label: 'Novidades',

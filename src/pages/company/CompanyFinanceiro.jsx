@@ -313,7 +313,7 @@ export default function CompanyFinanceiro() {
     return transactions.filter(t => {
       if (t.tipo !== tipoAtual) return false
       if (!t.vencimento?.startsWith(filterMonth)) return false
-      if (filterStatus !== 'todos' && t.status !== filterStatus) return false
+      if (filterStatus === 'vencidas' ? !isOverdue(t.vencimento, t.status) : (filterStatus !== 'todos' && t.status !== filterStatus)) return false
       if (filterForma !== 'todos' && t.forma_pagamento !== filterForma) return false
       if (q && !(t.descricao||'').toLowerCase().includes(q) && !(t.contact_nome||'').toLowerCase().includes(q)) return false
       return true
@@ -766,6 +766,7 @@ export default function CompanyFinanceiro() {
               <option value="pendente">Pendente</option>
               <option value="pago">Pago</option>
               <option value="cancelado">Cancelado</option>
+              <option value="vencidas">Vencidas</option>
             </select>
             <select className="nx-select" value={filterForma} onChange={e => setFilterForma(e.target.value)} style={{ fontSize: 13, width: 150, ...sora }}>
               <option value="todos">Todas formas</option>
