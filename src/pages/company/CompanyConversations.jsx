@@ -831,6 +831,7 @@ export default function CompanyConversations() {
                 quoted_text: row.quoted_text || null,
                 contact_card: row.contact_card || null,
                 apagada: row.apagada || false,
+                reaction: row.reaction || null,
               }]
             })
           }
@@ -839,13 +840,13 @@ export default function CompanyConversations() {
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: CONV_TABLE, filter: `instancia=eq.${instance}` },
         (p) => {
-          // Apagar do lado do cliente não gera mensagem nova, só um UPDATE
-          // marcando `apagada`. Sem assinar UPDATE, a bolha só era riscada
-          // depois de recarregar a página.
+          // Apagar e reagir do lado do cliente não geram mensagem nova, só um
+          // UPDATE na linha original. Sem assinar UPDATE, nem o riscado nem a
+          // reação apareciam antes de recarregar a página.
           const row = p.new
           if (!row || row.idgrupo) return
           setMessages(prev => prev.map(m => m.id === row.id
-            ? { ...m, apagada: row.apagada === true }
+            ? { ...m, apagada: row.apagada === true, reaction: row.reaction || null }
             : m))
         }
       )
@@ -877,7 +878,7 @@ export default function CompanyConversations() {
     setLoadingMsgs(true)
     setMessages([])
     setHasMoreMsgs(false)
-    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada')
+    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -900,6 +901,7 @@ export default function CompanyConversations() {
             quoted_text: r.quoted_text || null,
             contact_card: r.contact_card || null,
             apagada: r.apagada || false,
+            reaction: r.reaction || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
           })))
@@ -915,7 +917,7 @@ export default function CompanyConversations() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -938,6 +940,7 @@ export default function CompanyConversations() {
         quoted_text: r.quoted_text || null,
         contact_card: r.contact_card || null,
         apagada: r.apagada || false,
+        reaction: r.reaction || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
       }))
@@ -970,7 +973,7 @@ export default function CompanyConversations() {
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const oldestId = messages[0]?.id
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -992,6 +995,7 @@ export default function CompanyConversations() {
         quoted_text: r.quoted_text || null,
         contact_card: r.contact_card || null,
         apagada: r.apagada || false,
+        reaction: r.reaction || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
       }))
@@ -3038,6 +3042,23 @@ export default function CompanyConversations() {
                         )
                       })()}
                     </div>
+                    {/* Reacao do cliente. Chega como messageType=reactionMessage na
+                        Evolution: nao e mensagem nova, e um UPDATE apontando pra
+                        original. Some junto se a mensagem for apagada. */}
+                    {msg.reaction && !isDeleted && (
+                      <div style={{ display: 'flex', justifyContent: isLeft ? 'flex-start' : 'flex-end', marginTop: -5, marginBottom: 3 }}>
+                        <div
+                          title={isCliente ? 'Reacao' : 'Reacao do cliente'}
+                          style={{
+                            background: '#fff', border: '1px solid var(--border)', borderRadius: 20,
+                            padding: '0 8px', height: 23, minWidth: 27, display: 'inline-flex',
+                            alignItems: 'center', justifyContent: 'center', fontSize: 14.5, lineHeight: '23px',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+                          }}>
+                          {msg.reaction}
+                        </div>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: isLeft ? 'flex-start' : 'flex-end', gap: 5 }}>
                       {!isClosed && canRespond(selected) && editingMsgId !== msg.id && (
                         <button
