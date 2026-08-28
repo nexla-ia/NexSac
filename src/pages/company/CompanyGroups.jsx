@@ -8,6 +8,7 @@ import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileTex
 import { useContactTags, TagList, TagPicker, TagFilter, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import ImageLightbox from '../../components/ImageLightbox'
+import { detectSendError } from '../../lib/sendStatus'
 import './Company.css'
 
 function getMutedGroups(instance) {
@@ -137,6 +138,7 @@ export default function CompanyGroups() {
   const [groups, setGroups] = useState([])
   const [customNames, setCustomNames] = useState({}) // idgrupo → nome customizado (renomear na plataforma)
   const [lightbox, setLightbox] = useState(null) // src da imagem aberta em tela cheia
+  const [sendErr, setSendErr] = useState('') // aviso de envio recusado pelo WhatsApp
   const [renameModal, setRenameModal] = useState(null) // { idgrupo, value }
   const [savingRename, setSavingRename] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -360,6 +362,8 @@ export default function CompanyGroups() {
       setRenameModal(null)
     }
   }
+
+  useEffect(() => { setSendErr('') }, [selected?.idgrupo])
 
   const MSG_PAGE = 50
 
@@ -616,7 +620,20 @@ export default function CompanyGroups() {
               quoted_fromMe: (quoting.type || '').toLowerCase() !== 'cliente',
             } : {}),
           }),
-        }).catch(e => console.warn('webhook grupo:', e))
+        })
+          .then(r => r.text())
+          .then(t => {
+            // Antes só havia .catch, que pega falha de rede. Recusa do WhatsApp
+            // (número fora, grupo que a instância não participa mais) volta como
+            // HTTP 200 com corpo de erro, então passava batido e a mensagem
+            // ficava na tela como enviada.
+            const err = detectSendError(t)
+            if (err) {
+              setSendErr(`⚠️ Mensagem NÃO entregue no grupo: ${err}`)
+              setTimeout(() => setSendErr(''), 8000)
+            }
+          })
+          .catch(e => console.warn('webhook grupo:', e))
       }
     } finally {
       setSending(false)
@@ -1521,6 +1538,16 @@ export default function CompanyGroups() {
                   <button onClick={() => stopRecording()} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, background: '#DC2626', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                     <Square size={11} /> Parar
                   </button>
+                </div>
+              )}
+
+              {sendErr && (
+                <div style={{
+                  background: '#FEF2F2', border: '1px solid #FECACA', color: '#DC2626',
+                  borderRadius: 8, padding: '7px 12px', marginBottom: 8,
+                  fontSize: 12, fontWeight: 600,
+                }}>
+                  {sendErr}
                 </div>
               )}
 

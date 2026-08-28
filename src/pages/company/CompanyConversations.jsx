@@ -8,6 +8,7 @@ import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sp
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import ImageLightbox from '../../components/ImageLightbox'
+import { detectSendError } from '../../lib/sendStatus'
 import { canonSession, numeroVariants, normalizeBRDigits } from '../../lib/phone'
 import './Company.css'
 
@@ -1541,6 +1542,16 @@ export default function CompanyConversations() {
       })
         .then(r => r.text())
         .then(async text => {
+          // O webhook responde "instancia\nmensagem\nid_mensagem" quando dá certo.
+          // Quando o WhatsApp recusa (número inexistente, por exemplo) vem outra
+          // coisa, e antes o código só dava return: a mensagem ficava na tela como
+          // se tivesse ido, e ninguém descobria até o cliente não responder.
+          const sendErr = detectSendError(text)
+          if (sendErr) {
+            setToast({ message: `⚠️ Mensagem NÃO entregue no WhatsApp: ${sendErr}. Confira o número e tente de novo.`, color: '#DC2626' })
+            setTimeout(() => setToast(null), 8000)
+            return
+          }
           const [instResp, msgResp, msgId] = text.trim().split('\n').map(l => l.trim())
           if (!msgId || !instResp || !msgResp) return
           // Acha a linha pelo conteúdo da mensagem + instancia + numero (mais recente)
