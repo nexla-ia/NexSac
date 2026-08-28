@@ -1742,10 +1742,10 @@ export default function CompanyConversations() {
       const id_mensagem = fresh?.id_mensagem || msg.id_mensagem
 
       const { error } = await supabase.from('mensagens_geral')
-        .update({ mensagem: '🚫 Mensagem apagada', base64: null, apagada: true })
+        .update({ apagada: true })
         .eq('id', msg.id)
       if (error) throw error
-      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: '🚫 Mensagem apagada', base64: null, apagada: true } : m))
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, apagada: true } : m))
       fetch('https://n8n.nexladesenvolvimento.com.br/webhook/apagarmeg', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2770,7 +2770,7 @@ export default function CompanyConversations() {
                     </div>
                     <div className={`msg-row ${isLeft ? 'ai' : 'client'}`}>
                       {(() => {
-                        const media = isDeleted ? null : detectMedia(msg.base64)
+                        const media = detectMedia(msg.base64)
                         const rawContent = msg.content || ''
                         const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
                         const fileLine = fileLineMatch?.[1] || null
@@ -2780,9 +2780,9 @@ export default function CompanyConversations() {
                         // PDF e imagem nunca mostram texto junto — nem legenda no nosso padrão
                         // (📄 arquivo\nlegenda) nem texto solto que veio com a mídia (cliente/atendente)
                         const suppressCaption = media?.type === 'pdf' || media?.type === 'image'
-                        const vcard = (!media && !isDeleted) ? (detectVCard(msg.contact_card) || detectVCard(rawContent)) : null
-                        const locationUrl = (!media && !vcard && !isDeleted) ? detectLocation(rawContent) : null
-                        const displayContent = isDeleted ? '🚫 Mensagem apagada' : (vcard || locationUrl) ? '' : suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
+                        const vcard = !media ? (detectVCard(msg.contact_card) || detectVCard(rawContent)) : null
+                        const locationUrl = !media && !vcard ? detectLocation(rawContent) : null
+                        const displayContent = (vcard || locationUrl) ? '' : suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
                         const hasOnlyMedia = media && !displayContent
                         const isLongText = !isPlaceholder && displayContent.length > TEXT_LIMIT
                         const isExpanded = expandedMsgIds.has(msg.id)
@@ -3011,7 +3011,7 @@ export default function CompanyConversations() {
                               <>
                                 <span style={{
                                   whiteSpace: 'pre-wrap',
-                                  ...(isDeleted ? { fontStyle: 'italic', opacity: 0.7 } : {}),
+                                  ...(isDeleted ? { textDecoration: 'line-through', opacity: 0.6 } : {}),
                                 }}>
                                   {renderTextWithLinks(shownText, {
                                     color: isAtendente ? 'rgba(255,255,255,0.9)' : '#2563EB',
@@ -3038,6 +3038,15 @@ export default function CompanyConversations() {
                                 )}
                               </>
                             ) : null}
+                            {isDeleted && (
+                              <div style={{
+                                fontSize: 10.5, fontStyle: 'italic', opacity: 0.7,
+                                marginTop: displayContent || media || vcard || locationUrl ? 4 : 0,
+                                display: 'flex', alignItems: 'center', gap: 4,
+                              }}>
+                                <Trash2 size={10} /> {isCliente ? 'mensagem apagada pelo cliente' : 'mensagem apagada'}
+                              </div>
+                            )}
                           </div>
                         )
                       })()}
