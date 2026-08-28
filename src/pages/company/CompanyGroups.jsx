@@ -331,10 +331,10 @@ export default function CompanyGroups() {
   // Nomes customizados (renomear grupo só na plataforma)
   useEffect(() => {
     if (!instance) return
-    supabase.from('group_custom_names').select('idgrupo, custom_name').eq('instancia', instance)
+    supabase.from('group_custom_names').select('idgrupo, nome').eq('instancia', instance)
       .then(({ data }) => {
         const map = {}
-        ;(data || []).forEach(r => { map[r.idgrupo] = r.custom_name })
+        ;(data || []).forEach(r => { map[r.idgrupo] = r.nome })
         setCustomNames(map)
       })
   }, [instance])
@@ -345,7 +345,7 @@ export default function CompanyGroups() {
     setSavingRename(true)
     const { error } = name
       ? await supabase.from('group_custom_names')
-          .upsert({ instancia: instance, idgrupo: renameModal.idgrupo, custom_name: name }, { onConflict: 'instancia,idgrupo' })
+          .upsert({ instancia: instance, idgrupo: renameModal.idgrupo, nome: name, updated_at: new Date().toISOString() }, { onConflict: 'instancia,idgrupo' })
       : await supabase.from('group_custom_names').delete().eq('instancia', instance).eq('idgrupo', renameModal.idgrupo)
     setSavingRename(false)
     if (!error) {
