@@ -9,6 +9,7 @@ import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildT
 import QuickMessages from '../../components/QuickMessages'
 import ImageLightbox from '../../components/ImageLightbox'
 import { detectSendError } from '../../lib/sendStatus'
+import { fetchConversaContatos } from '../../lib/queries'
 import { canonSession, numeroVariants, normalizeBRDigits } from '../../lib/phone'
 import './Company.css'
 
@@ -674,42 +675,41 @@ export default function CompanyConversations() {
   useEffect(() => {
     if (!instance) return
     setLoadingContacts(true)
-    supabase.from(CONV_TABLE).select('id, numero, idgrupo, type, "horaLastMessage", created_at')
-      .eq('instancia', instance)
-      .or('aplicativo.eq.whatsapp,aplicativo.is.null')
-      .order('id', { ascending: false })
-      .limit(50000)
-      .then(({ data, error }) => {
-        if (!error && data) {
-          const seen = new Set()
-          const unique = []
-          // Indexa quem teve resposta de atendente humano em algum momento (só msgs individuais)
-          const hasOutsideHuman = new Set()
-          for (const row of data) {
-            if (row.idgrupo) continue
-            const t = (row.type || '').toLowerCase()
-            if ((t === 'atendente' || t === 'humano') && row.numero && !row.numero.includes('@g.us')) {
-              hasOutsideHuman.add(canonSession(row.numero))
+    // Antes isto era um select com .limit(50000) direto na tabela. O PostgREST
+    // corta em 1000 linhas de qualquer jeito, então quem não tivesse mensagem
+    // entre as 1000 mais recentes não aparecia na lista — 125 dos 172 contatos
+    // desta instância estavam invisíveis. Agora o servidor agrega e devolve um
+    // registro por número, sem depender de limite de linhas.
+    fetchConversaContatos(instance)
+      .then(rows => {
+        const seen = new Set()
+        const unique = []
+        // Canonicaliza (junta com/sem o 9 extra) pra não rachar a conversa em duas.
+        // Dois números crus podem virar o mesmo contato: o primeiro vence (a RPC
+        // já vem da mensagem mais recente pra mais antiga) e o outside_assumed
+        // é somado, senão o segundo apagaria a marca do primeiro.
+        for (const row of (rows || [])) {
+          if (!row.numero || row.numero.includes('@g.us')) continue
+          const sid = canonSession(row.numero)
+          if (seen.has(sid)) {
+            if (row.outside_assumed) {
+              const antes = unique.find(c => c.session_id === sid)
+              if (antes) antes.outsideAssumed = true
             }
+            continue
           }
-          // Canonicaliza (junta com/sem o 9 extra) pra não rachar a conversa em duas
-          for (const row of data) {
-            if (!row.numero || row.numero.includes('@g.us')) continue  // ignora grupos do WhatsApp
-            if (row.idgrupo) continue                                  // mensagem de grupo → tela de grupos
-            const sid = canonSession(row.numero)
-            if (seen.has(sid)) continue
-            seen.add(sid)
-            unique.push({
-              session_id: sid,
-              phone: formatPhone(sid),
-              lastTs: getTimestamp(row),
-              outsideAssumed: hasOutsideHuman.has(sid),
-            })
-          }
-          setContacts(unique)
+          seen.add(sid)
+          unique.push({
+            session_id: sid,
+            phone: formatPhone(sid),
+            lastTs: getTimestamp(row),
+            outsideAssumed: !!row.outside_assumed,
+          })
         }
-        setLoadingContacts(false)
+        setContacts(unique)
       })
+      .catch(e => console.warn('lista de contatos:', e))
+      .finally(() => setLoadingContacts(false))
   }, [instance])
 
   // Carrega sessões encerradas com motivo

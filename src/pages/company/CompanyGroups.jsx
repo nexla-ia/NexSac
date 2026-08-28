@@ -9,6 +9,7 @@ import { useContactTags, TagList, TagPicker, TagFilter, buildTagFilter } from '.
 import QuickMessages from '../../components/QuickMessages'
 import ImageLightbox from '../../components/ImageLightbox'
 import { detectSendError } from '../../lib/sendStatus'
+import { fetchGruposLista } from '../../lib/queries'
 import './Company.css'
 
 function getMutedGroups(instance) {
@@ -306,17 +307,14 @@ export default function CompanyGroups() {
   useEffect(() => {
     if (!instance) return
     setLoading(true)
-    supabase.from(CONV_TABLE)
-      .select('id, idgrupo, nomegrupo, mensagem, numero, nome, "horaLastMessage", created_at')
-      .eq('instancia', instance)
-      .not('idgrupo', 'is', null)
-      .order('id', { ascending: false })
-      .limit(20000)
-      .then(({ data, error }) => {
-        if (error || !data) { setLoading(false); return }
+    // Antes era um select com .limit(20000), mas o PostgREST corta em 1000:
+    // grupo sem mensagem recente sumia da lista. Agora o servidor devolve a
+    // última mensagem de cada grupo, sem depender de limite de linhas.
+    fetchGruposLista(instance)
+      .then(rows => {
         const seen = new Set()
         const unique = []
-        for (const row of data) {
+        for (const row of (rows || [])) {
           if (!row.idgrupo || seen.has(row.idgrupo)) continue
           seen.add(row.idgrupo)
           unique.push({
@@ -328,8 +326,9 @@ export default function CompanyGroups() {
           })
         }
         setGroups(unique)
-        setLoading(false)
       })
+      .catch(e => console.warn('lista de grupos:', e))
+      .finally(() => setLoading(false))
   }, [instance])
 
   // Nomes customizados (renomear grupo só na plataforma)

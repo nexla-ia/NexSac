@@ -110,9 +110,22 @@ export default function CompanyLayout() {
     Promise.all([
       supabase.from('conversation_reads').select('session_id, last_read_at')
         .eq('instancia', instance).eq('user_email', session.user.email),
-      supabase.from('mensagens_geral').select('idgrupo, created_at')
-        .eq('instancia', instance).not('idgrupo', 'is', null).ilike('type', 'cliente')
-        .order('id', { ascending: false }).limit(5000),
+      // .limit(5000) aqui era ilusao: o PostgREST devolve 1000. Grupo com
+      // mensagem antiga nao entrava na conta e o badge saia menor do que era.
+      // Pagina ate acabar em vez de confiar no limite.
+      (async () => {
+        const out = []
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase.from('mensagens_geral')
+            .select('idgrupo, created_at')
+            .eq('instancia', instance).not('idgrupo', 'is', null).ilike('type', 'cliente')
+            .order('id', { ascending: false }).range(from, from + 999)
+          if (error) break
+          out.push(...(data || []))
+          if (!data || data.length < 1000) break
+        }
+        return { data: out }
+      })(),
     ]).then(([{ data: reads }, { data: msgs }]) => {
       if (cancelled) return
       const readsMap = {}
