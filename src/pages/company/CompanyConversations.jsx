@@ -4,10 +4,10 @@ import EmojiPicker from 'emoji-picker-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2, MapPin, Contact, MoreHorizontal } from 'lucide-react'
+import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2, MapPin, Contact, MoreHorizontal, Kanban, ChevronRight, Check } from 'lucide-react'
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
-import { canonSession, numeroVariants } from '../../lib/phone'
+import { canonSession, numeroVariants, normalizeBRDigits } from '../../lib/phone'
 import './Company.css'
 
 const CONV_TABLE = 'mensagens_geral'
@@ -287,6 +287,13 @@ export default function CompanyConversations() {
   const [deletingMsgId, setDeletingMsgId] = useState(null)
   const [togglingAwaiting, setTogglingAwaiting] = useState(false)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false) // menu ⋯ do cabeçalho da conversa
+  // CRM no cabeçalho: funil ativo, etapas e quem já é lead.
+  const [crmFunnelId, setCrmFunnelId] = useState(null)
+  const [crmStages, setCrmStages]     = useState([])   // etapas do funil ativo
+  const [crmLeadMap, setCrmLeadMap]   = useState({})   // telefone canônico → { id, stage_id }
+  const [crmMenuOpen, setCrmMenuOpen] = useState(false)
+  const [crmSubOpen, setCrmSubOpen]   = useState(false) // submenu de etapas dentro do ⋯
+  const [crmSaving, setCrmSaving]     = useState(false)
   const [expandedMsgIds, setExpandedMsgIds] = useState(() => new Set())
   const [openResultIds, setOpenResultIds] = useState(() => new Set())
   const [loadingResultIds, setLoadingResultIds] = useState(() => new Set())
@@ -508,7 +515,81 @@ export default function CompanyConversations() {
   }
 
   // Fecha o menu ⋯ ao trocar de conversa, pra não ficar aberto sobre outra pessoa
-  useEffect(() => { setMoreMenuOpen(false) }, [selected?.session_id])
+  useEffect(() => { setMoreMenuOpen(false); setCrmMenuOpen(false); setCrmSubOpen(false) }, [selected?.session_id])
+  // Recolhe o submenu de etapas quando o ⋯ fecha
+  useEffect(() => { if (!moreMenuOpen) setCrmSubOpen(false) }, [moreMenuOpen])
+
+  // CRM: carrega o funil ativo, as etapas e o mapa de quem já é lead — assim o
+  // atendente adiciona/move o contato sem sair da conversa.
+  useEffect(() => {
+    if (!instance) return
+    let cancelled = false
+    ;(async () => {
+      const { data: fn } = await supabase.from('crm_funnels').select('id').eq('instancia', instance).order('posicao').limit(1)
+      const funnelId = fn?.[0]?.id || null
+      if (cancelled) return
+      setCrmFunnelId(funnelId)
+      if (funnelId) {
+        const { data: st } = await supabase.from('crm_stages')
+          .select('id,nome,cor,posicao').eq('instancia', instance).eq('funil_id', funnelId).order('posicao')
+        if (!cancelled) setCrmStages(st || [])
+      }
+      // Pagina: o PostgREST corta em 1000 e a base de leads passa disso fácil.
+      let from = 0, leads = []
+      for (;;) {
+        const { data, error } = await supabase.from('crm_contacts')
+          .select('id,phone,stage_id').eq('instancia', instance).range(from, from + 999)
+        if (error) break
+        leads.push(...(data || []))
+        if (!data || data.length < 1000) break
+        from += 1000
+      }
+      if (cancelled) return
+      const m = {}
+      for (const l of leads) { const k = normalizeBRDigits(l.phone); if (k) m[k] = { id: l.id, stage_id: l.stage_id } }
+      setCrmLeadMap(m)
+    })()
+    return () => { cancelled = true }
+  }, [instance])
+
+  async function handleAddToCrm(contact, stageId) {
+    if (crmSaving || !contact) return
+    const phone = (contact.phone || '').replace(/\D/g, '')
+    if (!phone) return
+    const key = normalizeBRDigits(phone)
+    setCrmSaving(true)
+    try {
+      const now = new Date().toISOString()
+      let existing = crmLeadMap[key]
+      if (!existing) {
+        // Dupla checagem no banco (com e sem o 9) pra não criar lead duplicado.
+        const alt = key.length === 12 ? key.slice(0, 4) + '9' + key.slice(4) : key
+        const { data } = await supabase.from('crm_contacts')
+          .select('id,stage_id').eq('instancia', instance).in('phone', [...new Set([phone, key, alt])]).limit(1)
+        if (data?.[0]) existing = { id: data[0].id, stage_id: data[0].stage_id }
+      }
+      if (existing) {
+        const { error } = await supabase.from('crm_contacts')
+          .update({ stage_id: stageId, funil_id: crmFunnelId, data_entrada_etapa: now }).eq('id', existing.id)
+        if (error) { setToast({ message: 'Erro ao mover no CRM: ' + error.message, color: '#DC2626' }); setTimeout(() => setToast(null), 5000); return }
+        setCrmLeadMap(prev => ({ ...prev, [key]: { id: existing.id, stage_id: stageId } }))
+      } else {
+        const nome = savedContacts[phone]?.nome || clientesMap[phone]?.nome || null
+        const { data, error } = await supabase.from('crm_contacts').insert({
+          instancia: instance, phone, nome, origem: 'WhatsApp', temperatura: 'morno',
+          stage_id: stageId, funil_id: crmFunnelId, data_entrada_etapa: now,
+        }).select('id').single()
+        if (error) { setToast({ message: 'Erro ao adicionar no CRM: ' + error.message, color: '#DC2626' }); setTimeout(() => setToast(null), 5000); return }
+        setCrmLeadMap(prev => ({ ...prev, [key]: { id: data.id, stage_id: stageId } }))
+      }
+      const stName = crmStages.find(s => s.id === stageId)?.nome || 'etapa'
+      setToast({ message: `Adicionado ao CRM · ${stName}`, color: '#16A34A' })
+      setTimeout(() => setToast(null), 3500)
+      setCrmMenuOpen(false)
+    } finally {
+      setCrmSaving(false)
+    }
+  }
 
   // Fecha menu de contexto ao clicar fora
   useEffect(() => {
@@ -2215,6 +2296,59 @@ export default function CompanyConversations() {
                       )
                       return (
                         <>
+                          {/* CRM - mostra em que etapa o contato esta e deixa mover */}
+                          {(() => {
+                            const lead = crmLeadMap[normalizeBRDigits(selected.phone)]
+                            const curStage = lead ? crmStages.find(st => st.id === lead.stage_id) : null
+                            return (
+                              <div style={{ position: 'relative' }}>
+                                <button
+                                  className="nx-btn-ghost"
+                                  style={{ fontSize: 12, padding: '7px 10px', display: 'flex', alignItems: 'center', color: lead ? '#16A34A' : '#4F46E5', borderColor: lead ? '#BBF7D0' : undefined, background: lead ? '#F0FDF4' : undefined }}
+                                  title={lead ? `No CRM: ${curStage?.nome || 'etapa'}` : 'Adicionar este contato ao CRM'}
+                                  onClick={() => setCrmMenuOpen(v => !v)}
+                                >
+                                  <Kanban size={15} />
+                                </button>
+                                {crmMenuOpen && (
+                                  <>
+                                    <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setCrmMenuOpen(false)} />
+                                    <div style={{
+                                      position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 51,
+                                      background: '#fff', border: '1px solid var(--border)', borderRadius: 10,
+                                      boxShadow: '0 8px 28px rgba(0,0,0,0.14)', padding: 6, minWidth: 230,
+                                    }}>
+                                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '5px 10px 7px' }}>
+                                        {lead ? 'Mover para a etapa' : 'Adicionar ao CRM na etapa'}
+                                      </div>
+                                      {crmStages.map(st => {
+                                        const active = curStage?.id === st.id
+                                        return (
+                                          <button key={st.id} disabled={crmSaving}
+                                            onClick={() => handleAddToCrm(selected, st.id)}
+                                            onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#F1F5F9' }}
+                                            onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                                            style={{
+                                              display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px',
+                                              border: 'none', borderRadius: 7, background: active ? '#EFF6FF' : 'transparent',
+                                              cursor: crmSaving ? 'default' : 'pointer', fontSize: 12.5, fontWeight: active ? 700 : 500,
+                                              color: '#0F172A', textAlign: 'left',
+                                            }}>
+                                            <span style={{ width: 9, height: 9, borderRadius: '50%', background: st.cor || '#64748B', flexShrink: 0 }} />
+                                            <span style={{ flex: 1 }}>{st.nome}</span>
+                                            {active && <Check size={13} color="#2563EB" />}
+                                          </button>
+                                        )
+                                      })}
+                                      {crmStages.length === 0 && (
+                                        <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma etapa no CRM ainda.</div>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )
+                          })()}
                           {/* Finalizar — única ação principal, fica sempre à vista */}
                           {canAct && (
                             <button
@@ -2244,6 +2378,58 @@ export default function CompanyConversations() {
                                   background: '#fff', border: '1px solid var(--border)', borderRadius: 10,
                                   boxShadow: '0 8px 28px rgba(0,0,0,0.14)', padding: 6, minWidth: 210,
                                 }}>
+                                  {/* Etapa do CRM - submenu que expande as etapas */}
+                                  {(() => {
+                                    const lead = crmLeadMap[normalizeBRDigits(selected.phone)]
+                                    const curStage = lead ? crmStages.find(st => st.id === lead.stage_id) : null
+                                    return (
+                                      <>
+                                        <button
+                                          onClick={() => setCrmSubOpen(v => !v)}
+                                          onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9' }}
+                                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                                          style={{
+                                            display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px',
+                                            border: 'none', borderRadius: 7, background: 'transparent', cursor: 'pointer',
+                                            fontSize: 12.5, fontWeight: 500, color: '#0F172A', textAlign: 'left',
+                                          }}>
+                                          <Kanban size={15} color={lead ? '#16A34A' : '#4F46E5'} />
+                                          <span style={{ flex: 1 }}>{lead ? `No CRM: ${curStage?.nome || 'etapa'}` : 'Enviar para etapa do CRM'}</span>
+                                          <ChevronRight size={14} color="var(--text-muted)" style={{ transform: crmSubOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                                        </button>
+                                        {crmSubOpen && (
+                                          <div style={{ margin: '2px 0 6px 12px', paddingLeft: 8, borderLeft: '2px solid #EEF2F7' }}>
+                                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 8px 5px' }}>
+                                              {lead ? 'Mover para a etapa' : 'Adicionar na etapa'}
+                                            </div>
+                                            {crmStages.map(st => {
+                                              const active = curStage?.id === st.id
+                                              return (
+                                                <button key={st.id} disabled={crmSaving}
+                                                  onClick={() => { handleAddToCrm(selected, st.id); setMoreMenuOpen(false) }}
+                                                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#F1F5F9' }}
+                                                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                                                  style={{
+                                                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 8px',
+                                                    border: 'none', borderRadius: 6, background: active ? '#EFF6FF' : 'transparent',
+                                                    cursor: crmSaving ? 'default' : 'pointer', fontSize: 12.5, fontWeight: active ? 700 : 500,
+                                                    color: '#0F172A', textAlign: 'left',
+                                                  }}>
+                                                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: st.cor || '#64748B', flexShrink: 0 }} />
+                                                  <span style={{ flex: 1 }}>{st.nome}</span>
+                                                  {active && <Check size={13} color="#2563EB" />}
+                                                </button>
+                                              )
+                                            })}
+                                            {crmStages.length === 0 && (
+                                              <div style={{ padding: '6px 8px', fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma etapa no CRM ainda.</div>
+                                            )}
+                                          </div>
+                                        )}
+                                        <div style={{ height: 1, background: '#F1F5F9', margin: '4px 6px' }} />
+                                      </>
+                                    )
+                                  })()}
                                   <Item
                                     icon={hasContact ? <UserCheck size={15} /> : <UserPlus size={15} />}
                                     color={hasContact ? '#16A34A' : '#C9A074'}
