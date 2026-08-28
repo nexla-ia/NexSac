@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase'
 import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2, MapPin, Contact, MoreHorizontal, Kanban, ChevronRight, Check } from 'lucide-react'
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
+import ImageLightbox from '../../components/ImageLightbox'
 import { canonSession, numeroVariants, normalizeBRDigits } from '../../lib/phone'
 import './Company.css'
 
@@ -3417,14 +3418,7 @@ export default function CompanyConversations() {
         </div>
       , document.body)}
 
-      {lightbox && createPortal(
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, cursor: 'zoom-out' }}
-          onClick={() => setLightbox(null)}
-        >
-          <img src={lightbox} alt="mídia" style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 10, boxShadow: '0 8px 40px rgba(0,0,0,0.5)' }} />
-        </div>
-      , document.body)}
+      {lightbox && <ImageLightbox src={lightbox} alt="mídia" onClose={() => setLightbox(null)} />}
 
       {toast && createPortal(
         <div style={{

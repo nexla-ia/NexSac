@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase'
 import { Users, ChevronLeft, Send, Mic, Square, Paperclip, Trash2, Film, FileText, BellOff, Bell, ChevronRight, Loader2, Phone, X, MessageCircle, UserPlus, Check, Pencil, Search, MapPin, Contact, Reply } from 'lucide-react'
 import { useContactTags, TagList, TagPicker, TagFilter, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
+import ImageLightbox from '../../components/ImageLightbox'
 import './Company.css'
 
 function getMutedGroups(instance) {
@@ -135,6 +136,7 @@ export default function CompanyGroups() {
   const instanceOwner = session?.company?.numero_base || null
   const [groups, setGroups] = useState([])
   const [customNames, setCustomNames] = useState({}) // idgrupo → nome customizado (renomear na plataforma)
+  const [lightbox, setLightbox] = useState(null) // src da imagem aberta em tela cheia
   const [renameModal, setRenameModal] = useState(null) // { idgrupo, value }
   const [savingRename, setSavingRename] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -1313,7 +1315,9 @@ export default function CompanyGroups() {
                         )}
                         {media?.type === 'image' && (
                           <img src={media.src} alt="imagem"
-                            style={{ maxWidth: 240, maxHeight: 280, borderRadius: 8, display: 'block' }} />
+                            onClick={() => setLightbox(media.src)}
+                            title="Clique para ampliar"
+                            style={{ maxWidth: 240, maxHeight: 280, borderRadius: 8, display: 'block', cursor: 'zoom-in' }} />
                         )}
                         {media?.type === 'video' && (
                           <video controls src={media.src}
@@ -1708,6 +1712,8 @@ export default function CompanyGroups() {
       </>,
       document.body
     )}
+
+    {lightbox && <ImageLightbox src={lightbox} alt="imagem" onClose={() => setLightbox(null)} />}
 
     {renameModal && createPortal(
       <div style={{
