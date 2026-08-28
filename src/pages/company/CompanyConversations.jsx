@@ -18,8 +18,14 @@ function formatPhone(val) {
 
 function fmtPhoneDisplay(digits) {
   const d = (digits || '').replace(/\D/g, '')
-  if (d.length >= 12) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9,13)}`
+  // Precisa separar 13 de 12 dígitos: 13 = DDI+DDD+9 (celular com o 9 extra),
+  // 12 = DDI+DDD+8 (formato antigo, ainda comum em contato salvo e em vCard).
+  // Tratar os dois como 13 deslocava os dígitos: 556992695898 saía
+  // "+55 (69) 92695-898" em vez de "+55 (69) 9269-5898".
+  if (d.length >= 13) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9,13)}`
+  if (d.length === 12) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,8)}-${d.slice(8,12)}`
   if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
+  if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`
   return digits || ''
 }
 
@@ -487,6 +493,18 @@ export default function CompanyConversations() {
     searchParams.delete('contact')
     setSearchParams(searchParams, { replace: true })
   }, [searchParams, loadingContacts])
+
+  // Abre a conversa de um número aqui dentro, em vez de mandar pro WhatsApp.
+  // Reaproveita o fluxo do ?contact=: o efeito acima acha a conversa existente
+  // (normalizando o 9 do celular via canonSession) ou cria uma sintética na
+  // Recepção quando ainda não houve mensagem nenhuma com esse número.
+  function openConversationWith(numero) {
+    const digits = String(numero || '').replace(/\D/g, '')
+    if (!digits) return
+    const next = new URLSearchParams(searchParams)
+    next.set('contact', digits)
+    setSearchParams(next, { replace: true })
+  }
 
   // Fecha menu de contexto ao clicar fora
   useEffect(() => {
@@ -2666,11 +2684,14 @@ export default function CompanyConversations() {
                                   </div>
                                   {vcard.phone && (
                                     <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                                      <a href={`https://wa.me/${vcard.phone}`} target="_blank" rel="noreferrer"
+                                      <button
+                                        onClick={() => openConversationWith(vcard.phone)}
+                                        title="Abrir a conversa deste contato aqui na plataforma"
                                         style={{
                                           fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6,
-                                          textDecoration: 'none', background: '#25D366', color: '#fff',
-                                        }}>Conversar</a>
+                                          border: 'none', cursor: 'pointer',
+                                          background: '#25D366', color: '#fff',
+                                        }}>Conversar</button>
                                       <button
                                         onClick={() => setSaveContactModal({ numero: vcard.phone, nome: vcard.name, notes: '' })}
                                         style={{
