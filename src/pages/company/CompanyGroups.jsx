@@ -105,13 +105,21 @@ function detectMedia(b64) {
 }
 
 // Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em vCard puro
-function detectVCard(text) {
-  if (!text || !text.includes('BEGIN:VCARD')) return null
-  const nameMatch = text.match(/FN:(.+)/i) || text.match(/N:(.+)/i)
-  const telMatch = text.match(/TEL[^:]*:([+()\d\s-]+)/i)
+function detectVCard(source) {
+  // Mesmo tratamento das Conversas: o vCard chega como texto da mensagem, como
+  // objeto { displayName, vcard } em contact_card, ou como o vCard cru em
+  // string nessa mesma coluna. Sem cobrir os tres, o cartao saia vazio.
+  if (!source) return null
+  const isText = typeof source === 'string'
+  const raw = isText ? source : (source.vcard || source.contacts?.[0]?.vcard || '')
+  if (!raw || !raw.includes('BEGIN:VCARD')) return null
+  const displayName = isText ? null : (source.displayName || source.contacts?.[0]?.displayName)
+  const nameMatch = raw.match(/FN:(.+)/i) || raw.match(/N:(.+)/i)
+  const telMatch = raw.match(/TEL[^:]*:([+()\d\s-]+)/i)
+  const waid = raw.match(/waid=(\d+)/i)
   return {
-    name: (nameMatch?.[1] || 'Contato').trim(),
-    phone: telMatch ? telMatch[1].replace(/\D/g, '') : null,
+    name: (displayName || nameMatch?.[1] || 'Contato').trim(),
+    phone: waid?.[1] || (telMatch ? telMatch[1].replace(/\D/g, '') : null),
   }
 }
 
@@ -125,7 +133,8 @@ function detectLocation(text) {
 
 function fmtPhoneDisplay(digits) {
   const d = (digits || '').replace(/\D/g, '')
-  if (d.length >= 12) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9,13)}`
+  if (d.length >= 13) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9,13)}`
+  if (d.length === 12) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,8)}-${d.slice(8,12)}`
   if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`
   return digits || ''
 }
@@ -372,7 +381,7 @@ export default function CompanyGroups() {
     setMessages([])
     setHasMoreMsgs(false)
     supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, contact_card, apagada, reaction')
       .eq('instancia', instance)
       .eq('idgrupo', selected.idgrupo)
       .order('id', { ascending: false })
@@ -419,6 +428,18 @@ export default function CompanyGroups() {
           if (selectedRef.current?.idgrupo === row.idgrupo) {
             setMessages(msgs => [...msgs, row])
           }
+        }
+      )
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: CONV_TABLE, filter: `instancia=eq.${instance}` },
+        (p) => {
+          // Apagar e reagir no grupo nao geram mensagem nova, so UPDATE na linha
+          // original. Sem assinar UPDATE, nada disso aparecia sem recarregar.
+          const row = p.new
+          if (!row || !row.idgrupo) return
+          setMessages(prev => prev.map(m => m.id === row.id
+            ? { ...m, apagada: row.apagada === true, reaction: row.reaction || null }
+            : m))
         }
       )
       .subscribe()
@@ -684,7 +705,7 @@ export default function CompanyGroups() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, contact_card, apagada, reaction')
       .eq('instancia', instance)
       .eq('idgrupo', selected.idgrupo)
       .lt('id', oldestId)
@@ -721,7 +742,7 @@ export default function CompanyGroups() {
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const oldestId = messages[0]?.id
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, contact_card, apagada, reaction')
       .eq('instancia', instance)
       .eq('idgrupo', selected.idgrupo)
       .gte('id', dbId)
@@ -753,7 +774,7 @@ export default function CompanyGroups() {
     const esc = q.replace(/[\\%_]/g, s => '\\' + s)
     const timer = setTimeout(() => {
       supabase.from(CONV_TABLE)
-        .select('id, id_mensagem, numero, nome, type, mensagem, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text')
+        .select('id, id_mensagem, numero, nome, type, mensagem, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, contact_card, apagada, reaction')
         .eq('instancia', instance)
         .eq('idgrupo', selected.idgrupo)
         .ilike('mensagem', `%${esc}%`)
@@ -1217,12 +1238,16 @@ export default function CompanyGroups() {
                 const type = (msg.type || '').toLowerCase()
                 const isAtendente = type === 'atendente' || type === 'humano'
                 const ts = parseTs(msg)
+                // Apagar tem dois caminhos: a plataforma sobrescreve o texto;
+                // quando o participante apaga no celular, o n8n so marca a coluna
+                // `apagada` e o conteudo continua. So o primeiro era tratado aqui.
+                const isDeleted = msg.apagada === true || msg.mensagem === '🚫 Mensagem apagada'
                 const media = detectMedia(msg.base64)
                 const rawContent = msg.mensagem || ''
                 const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
                 const fileLine = fileLineMatch?.[1] || null
                 const isPlaceholder = !!fileLine
-                const vcard = !media ? detectVCard(rawContent) : null
+                const vcard = !media ? (detectVCard(msg.contact_card) || detectVCard(rawContent)) : null
                 const locationUrl = !media && !vcard ? detectLocation(rawContent) : null
                 const displayContent = (vcard || locationUrl) ? '' : isPlaceholder ? (fileLineMatch[3]?.trim() || '') : rawContent
                 const isLongText = !isPlaceholder && displayContent.length > TEXT_LIMIT
@@ -1399,7 +1424,7 @@ export default function CompanyGroups() {
                           </div>
                         ) : (!media && !vcard && !locationUrl && displayContent && (
                           <>
-                            <span style={{ whiteSpace: 'pre-wrap' }}>
+                            <span style={{ whiteSpace: 'pre-wrap', ...(isDeleted ? { textDecoration: 'line-through', opacity: 0.6 } : {}) }}>
                               {renderTextWithLinks(shownText, {
                                 color: (msg.type || '').toLowerCase() === 'atendente' || (msg.type || '').toLowerCase() === 'humano'
                                   ? 'rgba(255,255,255,0.9)' : '#2563EB',
@@ -1425,7 +1450,31 @@ export default function CompanyGroups() {
                             )}
                           </>
                         ))}
+                        {isDeleted && (
+                          <div style={{
+                            fontSize: 10.5, fontStyle: 'italic', opacity: 0.7, marginTop: 4,
+                            display: 'flex', alignItems: 'center', gap: 4,
+                          }}>
+                            <Trash2 size={10} /> {isAtendente ? 'mensagem apagada' : 'mensagem apagada pelo participante'}
+                          </div>
+                        )}
                       </div>
+                      {/* Reacao. Nao e mensagem nova: a Evolution manda um evento que
+                          vira UPDATE na linha original. Some junto se for apagada. */}
+                      {msg.reaction && !isDeleted && (
+                        <div style={{ display: 'flex', justifyContent: isAtendente ? 'flex-end' : 'flex-start', marginTop: -3, marginBottom: 2 }}>
+                          <div
+                            title="Reacao"
+                            style={{
+                              background: '#fff', border: '1px solid var(--border)', borderRadius: 20,
+                              padding: '0 8px', height: 23, minWidth: 27, display: 'inline-flex',
+                              alignItems: 'center', justifyContent: 'center', fontSize: 14.5, lineHeight: '23px',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+                            }}>
+                            {msg.reaction}
+                          </div>
+                        </div>
+                      )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
                           {formatTime(ts)}
@@ -1439,7 +1488,7 @@ export default function CompanyGroups() {
                             <Reply size={12} />
                           </button>
                         )}
-                        {isAtendente && editingMsgId !== msg.id && !media && msg.mensagem !== '🚫 Mensagem apagada' && (
+                        {isAtendente && editingMsgId !== msg.id && !media && !isDeleted && (
                           <button
                             onClick={() => { setEditingMsgId(msg.id); setEditingText(displayContent) }}
                             title="Editar mensagem"
