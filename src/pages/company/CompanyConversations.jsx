@@ -82,13 +82,26 @@ function detectMedia(b64) {
 
 // Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em
 // formato vCard puro (BEGIN:VCARD...END:VCARD) independente do que o n8n faz com o resto.
-function detectVCard(text) {
-  if (!text || !text.includes('BEGIN:VCARD')) return null
-  const nameMatch = text.match(/FN:(.+)/i) || text.match(/N:(.+)/i)
-  const telMatch = text.match(/TEL[^:]*:([+()\d\s-]+)/i)
+function detectVCard(source) {
+  // Aceita três formas, porque o vCard chega de jeitos diferentes:
+  //  1. o texto da mensagem, quando o vCard vem colado no corpo (caso antigo);
+  //  2. a coluna contact_card como objeto { displayName, vcard } — o que o
+  //     n8n grava quando mapeia data.message.contactMessage;
+  //  3. a coluna contact_card como o vCard CRU em string.
+  // Sem o 2 e o 3 a bolha saía vazia: o n8n passou a preencher contact_card e
+  // deixar `mensagem` nula, então não havia texto onde procurar.
+  if (!source) return null
+  const isText = typeof source === 'string'
+  const raw = isText ? source : (source.vcard || source.contacts?.[0]?.vcard || '')
+  if (!raw || !raw.includes('BEGIN:VCARD')) return null
+  const displayName = isText ? null : (source.displayName || source.contacts?.[0]?.displayName)
+  const nameMatch = raw.match(/FN:(.+)/i) || raw.match(/N:(.+)/i)
+  const telMatch = raw.match(/TEL[^:]*:([+()\d\s-]+)/i)
+  // waid é o número internacional canônico; o TEL vem formatado pro país.
+  const waid = raw.match(/waid=(\d+)/i)
   return {
-    name: (nameMatch?.[1] || 'Contato').trim(),
-    phone: telMatch ? telMatch[1].replace(/\D/g, '') : null,
+    name: (displayName || nameMatch?.[1] || 'Contato').trim(),
+    phone: waid?.[1] || (telMatch ? telMatch[1].replace(/\D/g, '') : null),
   }
 }
 
@@ -711,6 +724,7 @@ export default function CompanyConversations() {
                 ts,
                 quoted_id_mensagem: row.quoted_id_mensagem || null,
                 quoted_text: row.quoted_text || null,
+                contact_card: row.contact_card || null,
               }]
             })
           }
@@ -744,7 +758,7 @@ export default function CompanyConversations() {
     setLoadingMsgs(true)
     setMessages([])
     setHasMoreMsgs(false)
-    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary')
+    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -765,6 +779,7 @@ export default function CompanyConversations() {
             ts: getTimestamp(r),
             quoted_id_mensagem: r.quoted_id_mensagem || null,
             quoted_text: r.quoted_text || null,
+            contact_card: r.contact_card || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
           })))
@@ -780,7 +795,7 @@ export default function CompanyConversations() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -801,6 +816,7 @@ export default function CompanyConversations() {
         ts: getTimestamp(r),
         quoted_id_mensagem: r.quoted_id_mensagem || null,
         quoted_text: r.quoted_text || null,
+        contact_card: r.contact_card || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
       }))
@@ -833,7 +849,7 @@ export default function CompanyConversations() {
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const oldestId = messages[0]?.id
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -853,6 +869,7 @@ export default function CompanyConversations() {
         ts: getTimestamp(r),
         quoted_id_mensagem: r.quoted_id_mensagem || null,
         quoted_text: r.quoted_text || null,
+        contact_card: r.contact_card || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
       }))
@@ -2507,7 +2524,7 @@ export default function CompanyConversations() {
                         // PDF e imagem nunca mostram texto junto — nem legenda no nosso padrão
                         // (📄 arquivo\nlegenda) nem texto solto que veio com a mídia (cliente/atendente)
                         const suppressCaption = media?.type === 'pdf' || media?.type === 'image'
-                        const vcard = !media ? detectVCard(rawContent) : null
+                        const vcard = !media ? (detectVCard(msg.contact_card) || detectVCard(rawContent)) : null
                         const locationUrl = !media && !vcard ? detectLocation(rawContent) : null
                         const displayContent = (vcard || locationUrl) ? '' : suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
                         const hasOnlyMedia = media && !displayContent
