@@ -4,7 +4,7 @@ import EmojiPicker from 'emoji-picker-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2, MapPin, Contact } from 'lucide-react'
+import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2, MapPin, Contact, MoreHorizontal } from 'lucide-react'
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import { canonSession, numeroVariants } from '../../lib/phone'
@@ -286,6 +286,7 @@ export default function CompanyConversations() {
   const [savingEdit, setSavingEdit]       = useState(false)
   const [deletingMsgId, setDeletingMsgId] = useState(null)
   const [togglingAwaiting, setTogglingAwaiting] = useState(false)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false) // menu ⋯ do cabeçalho da conversa
   const [expandedMsgIds, setExpandedMsgIds] = useState(() => new Set())
   const [openResultIds, setOpenResultIds] = useState(() => new Set())
   const [loadingResultIds, setLoadingResultIds] = useState(() => new Set())
@@ -506,6 +507,9 @@ export default function CompanyConversations() {
     setSearchParams(next, { replace: true })
   }
 
+  // Fecha o menu ⋯ ao trocar de conversa, pra não ficar aberto sobre outra pessoa
+  useEffect(() => { setMoreMenuOpen(false) }, [selected?.session_id])
+
   // Fecha menu de contexto ao clicar fora
   useEffect(() => {
     if (!contextMenu) return
@@ -705,7 +709,7 @@ export default function CompanyConversations() {
           if (isClientMsg && selectedRef.current?.session_id !== sid) {
             setUnreadCounts(prev => ({ ...prev, [sid]: (prev[sid] || 0) + 1 }))
           }
-          // Cliente respondeu → limpa "aguardando paciente" automaticamente
+          // Cliente respondeu → limpa "aguardando cliente" automaticamente
           if (isClientMsg) {
             setAttendancesMap(prev => {
               if (!prev[sid]?.awaiting_client) return prev
@@ -2058,7 +2062,7 @@ export default function CompanyConversations() {
                         </span>
                         {att.awaiting_client && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 20, color: '#D97706', background: '#FFFBEB', border: '1px solid #FDE68A', lineHeight: '16px' }}>
-                            <Clock size={9} /> Aguardando paciente
+                            <Clock size={9} /> Aguardando cliente
                           </span>
                         )}
                       </>
@@ -2187,90 +2191,97 @@ export default function CompanyConversations() {
                       userEmail={session?.user?.email}
                       anchor="bottom-right"
                     />
-                    <button
-                      className="nx-btn-ghost"
-                      style={{
-                        fontSize: 12, padding: '7px 14px',
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        color: hasContact ? '#16A34A' : '#C9A074',
-                        borderColor: hasContact ? '#BBF7D0' : '#F0E0B6',
-                        background: hasContact ? '#F0FDF4' : '#FFFBEB',
-                      }}
-                      title={hasContact ? `Já salvo como ${saved.nome}` : 'Salvar contato pra aparecer com nome'}
-                      onClick={() => openSaveContact(selected)}
-                    >
-                      {hasContact ? <UserCheck size={14} /> : <UserPlus size={14} />}
-                      <span className="btn-label">{hasContact ? `Editar ${saved.nome}` : 'Salvar contato'}</span>
-                    </button>
-                    <button
-                      className="nx-btn-ghost"
-                      style={{ fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6, color: '#7C3AED' }}
-                      onClick={() => navigate(`/painel/agenda?numero=${cleanNum}${nome ? `&nome=${encodeURIComponent(nome)}` : ''}`)}
-                    >
-                      <Calendar size={14} /> <span className="btn-label">Agendar</span>
-                    </button>
                     {(() => {
-                      const att = attendancesMap[selected.session_id]
+                      const att     = attendancesMap[selected.session_id]
                       const myEmail = session?.user?.email
                       const isOwner = att?.attendant_email === myEmail
                       const isElse  = att && !isOwner
-
-                      return (
-                        <>
-                          {/* Transferir — só o dono ou admin vê */}
-                          {att && (isOwner || isAdmin) && (
-                            <button
-                              className="nx-btn-ghost"
-                              style={{ fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6, color: '#0891B2' }}
-                              onClick={() => { setTransferModal(selected); setTransferringTo('') }}
-                              title="Passar essa conversa pra outro atendente"
-                            >
-                              <ArrowRightLeft size={14} /> <span className="btn-label">Transferir</span>
-                            </button>
-                          )}
-                          {/* Puxar para mim — quando está com outro atendente */}
-                          {isElse && (
-                            <button
-                              className="nx-btn-ghost"
-                              style={{ fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6, color: '#D97706', borderColor: '#FDE68A', background: '#FFFBEB' }}
-                              onClick={() => handlePullConversation(selected)}
-                              title={`Puxar de volta de ${att.attendant_name || 'outro atendente'}`}
-                            >
-                              <Inbox size={14} /> <span className="btn-label">Puxar para mim</span>
-                            </button>
-                          )}
-                        </>
-                      )
-                    })()}
-                    {(() => {
-                      const att = attendancesMap[selected.session_id]
-                      const isOwner = !att || isAdmin || att.attendant_email === session?.user?.email
-                      if (!isOwner) return null
-                      return (
-                        <>
-                          {att && (
-                            <button
-                              className="nx-btn-ghost"
-                              style={{
-                                fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6,
-                                color: att.awaiting_client ? '#D97706' : undefined,
-                                borderColor: att.awaiting_client ? '#FDE68A' : undefined,
-                                background: att.awaiting_client ? '#FFFBEB' : undefined,
-                              }}
-                              title="Marcar que já respondi e estou esperando o cliente"
-                              disabled={togglingAwaiting}
-                              onClick={handleToggleAwaitingClient}
-                            >
-                              <Clock size={14} /> <span className="btn-label">{att.awaiting_client ? 'Aguardando paciente' : 'Aguardando resposta?'}</span>
-                            </button>
-                          )}
+                      const canAct  = !att || isAdmin || isOwner
+                      // Item do menu ⋯ — mesmo desenho pra todos, só muda ícone/cor.
+                      const Item = ({ icon, label, onClick, color, title }) => (
                         <button
-                          className="nx-btn-ghost"
-                          style={{ fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
-                          onClick={() => { setCloseModal(selected); setReason('') }}
-                        >
-                          <CheckCircle2 size={14} /> <span className="btn-label">Finalizar conversa</span>
+                          title={title}
+                          onClick={() => { setMoreMenuOpen(false); onClick() }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9' }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '8px 10px',
+                            border: 'none', borderRadius: 7, background: 'transparent', cursor: 'pointer',
+                            fontSize: 12.5, fontWeight: 500, color: '#0F172A', textAlign: 'left',
+                          }}>
+                          <span style={{ color: color || 'var(--text-muted)', display: 'flex' }}>{icon}</span>
+                          <span style={{ flex: 1 }}>{label}</span>
                         </button>
+                      )
+                      return (
+                        <>
+                          {/* Finalizar — única ação principal, fica sempre à vista */}
+                          {canAct && (
+                            <button
+                              className="nx-btn-ghost"
+                              style={{ fontSize: 12, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6, color: '#16A34A', borderColor: '#BBF7D0', background: '#F0FDF4' }}
+                              onClick={() => { setCloseModal(selected); setReason('') }}
+                              title="Finalizar esta conversa"
+                            >
+                              <CheckCircle2 size={14} /> <span className="btn-label">Finalizar</span>
+                            </button>
+                          )}
+                          {/* ⋯ Mais — o resto vai pra cá pra não poluir o cabeçalho */}
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              className="nx-btn-ghost"
+                              style={{ fontSize: 12, padding: '7px 10px', display: 'flex', alignItems: 'center', color: moreMenuOpen ? '#2563EB' : 'var(--text-muted)', borderColor: moreMenuOpen ? '#BFDBFE' : undefined, background: moreMenuOpen ? '#EFF6FF' : undefined }}
+                              onClick={() => setMoreMenuOpen(v => !v)}
+                              title="Mais ações"
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+                            {moreMenuOpen && (
+                              <>
+                                <div style={{ position: 'fixed', inset: 0, zIndex: 50 }} onClick={() => setMoreMenuOpen(false)} />
+                                <div style={{
+                                  position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 51,
+                                  background: '#fff', border: '1px solid var(--border)', borderRadius: 10,
+                                  boxShadow: '0 8px 28px rgba(0,0,0,0.14)', padding: 6, minWidth: 210,
+                                }}>
+                                  <Item
+                                    icon={hasContact ? <UserCheck size={15} /> : <UserPlus size={15} />}
+                                    color={hasContact ? '#16A34A' : '#C9A074'}
+                                    label={hasContact ? `Editar ${saved.nome}` : 'Salvar contato'}
+                                    title={hasContact ? undefined : 'Salvar contato pra aparecer com nome'}
+                                    onClick={() => openSaveContact(selected)}
+                                  />
+                                  <Item
+                                    icon={<Calendar size={15} />} color="#7C3AED" label="Agendar"
+                                    onClick={() => navigate(`/painel/agenda?numero=${cleanNum}${nome ? `&nome=${encodeURIComponent(nome)}` : ''}`)}
+                                  />
+                                  {att && (isOwner || isAdmin) && (
+                                    <Item
+                                      icon={<ArrowRightLeft size={15} />} color="#0891B2" label="Transferir conversa"
+                                      title="Passar essa conversa pra outro atendente"
+                                      onClick={() => { setTransferModal(selected); setTransferringTo('') }}
+                                    />
+                                  )}
+                                  {isElse && (
+                                    <Item
+                                      icon={<Inbox size={15} />} color="#D97706" label="Puxar para mim"
+                                      title={`Puxar de volta de ${att.attendant_name || 'outro atendente'}`}
+                                      onClick={() => handlePullConversation(selected)}
+                                    />
+                                  )}
+                                  {att && canAct && (
+                                    <Item
+                                      icon={<Clock size={15} />}
+                                      color={att.awaiting_client ? '#D97706' : undefined}
+                                      label={att.awaiting_client ? 'Aguardando cliente' : 'Aguardando resposta?'}
+                                      title="Marcar que já respondi e estou esperando o cliente"
+                                      onClick={() => { if (!togglingAwaiting) handleToggleAwaitingClient() }}
+                                    />
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </>
                       )
                     })()}
