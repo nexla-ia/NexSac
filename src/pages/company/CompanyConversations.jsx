@@ -830,23 +830,9 @@ export default function CompanyConversations() {
                 quoted_id_mensagem: row.quoted_id_mensagem || null,
                 quoted_text: row.quoted_text || null,
                 contact_card: row.contact_card || null,
-                apagada: row.apagada || false,
               }]
             })
           }
-        }
-      )
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: CONV_TABLE, filter: `instancia=eq.${instance}` },
-        (p) => {
-          // Quando o cliente apaga no celular, o n8n só faz UPDATE marcando
-          // `apagada` — não entra mensagem nova. Sem assinar UPDATE, a bolha
-          // só era riscada depois de recarregar a página.
-          const row = p.new
-          if (!row || row.idgrupo) return
-          setMessages(prev => prev.map(m => m.id === row.id
-            ? { ...m, apagada: row.apagada === true }
-            : m))
         }
       )
       .subscribe()
@@ -877,7 +863,7 @@ export default function CompanyConversations() {
     setLoadingMsgs(true)
     setMessages([])
     setHasMoreMsgs(false)
-    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada')
+    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -899,7 +885,6 @@ export default function CompanyConversations() {
             quoted_id_mensagem: r.quoted_id_mensagem || null,
             quoted_text: r.quoted_text || null,
             contact_card: r.contact_card || null,
-            apagada: r.apagada || false,
             transcript: r.transcript || null,
             summary: r.summary || null,
           })))
@@ -915,7 +900,7 @@ export default function CompanyConversations() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -937,7 +922,6 @@ export default function CompanyConversations() {
         quoted_id_mensagem: r.quoted_id_mensagem || null,
         quoted_text: r.quoted_text || null,
         contact_card: r.contact_card || null,
-        apagada: r.apagada || false,
             transcript: r.transcript || null,
             summary: r.summary || null,
       }))
@@ -970,7 +954,7 @@ export default function CompanyConversations() {
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const oldestId = messages[0]?.id
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -991,7 +975,6 @@ export default function CompanyConversations() {
         quoted_id_mensagem: r.quoted_id_mensagem || null,
         quoted_text: r.quoted_text || null,
         contact_card: r.contact_card || null,
-        apagada: r.apagada || false,
             transcript: r.transcript || null,
             summary: r.summary || null,
       }))
@@ -1738,10 +1721,10 @@ export default function CompanyConversations() {
       const id_mensagem = fresh?.id_mensagem || msg.id_mensagem
 
       const { error } = await supabase.from('mensagens_geral')
-        .update({ mensagem: '🚫 Mensagem apagada', base64: null, apagada: true })
+        .update({ mensagem: '🚫 Mensagem apagada', base64: null })
         .eq('id', msg.id)
       if (error) throw error
-      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: '🚫 Mensagem apagada', base64: null, apagada: true } : m))
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: '🚫 Mensagem apagada', base64: null } : m))
       fetch('https://n8n.nexladesenvolvimento.com.br/webhook/apagarmeg', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2758,13 +2741,7 @@ export default function CompanyConversations() {
                     </div>
                     <div className={`msg-row ${isLeft ? 'ai' : 'client'}`}>
                       {(() => {
-                        // Apagar tem dois caminhos: a plataforma sobrescreve o texto por
-                        // "Mensagem apagada" e limpa o base64; quando o CLIENTE apaga no
-                        // celular dele, o n8n só marca a coluna `apagada` e o conteúdo
-                        // continua no banco. Sem olhar a coluna, a mensagem seguia
-                        // aparecendo inteira aqui — inclusive foto e cartão de contato.
-                        const isDeleted = msg.apagada === true || msg.content === '🚫 Mensagem apagada'
-                        const media = isDeleted ? null : detectMedia(msg.base64)
+                        const media = detectMedia(msg.base64)
                         const rawContent = msg.content || ''
                         const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
                         const fileLine = fileLineMatch?.[1] || null
@@ -2774,9 +2751,9 @@ export default function CompanyConversations() {
                         // PDF e imagem nunca mostram texto junto — nem legenda no nosso padrão
                         // (📄 arquivo\nlegenda) nem texto solto que veio com a mídia (cliente/atendente)
                         const suppressCaption = media?.type === 'pdf' || media?.type === 'image'
-                        const vcard = (!media && !isDeleted) ? (detectVCard(msg.contact_card) || detectVCard(rawContent)) : null
-                        const locationUrl = (!media && !vcard && !isDeleted) ? detectLocation(rawContent) : null
-                        const displayContent = isDeleted ? '🚫 Mensagem apagada' : (vcard || locationUrl) ? '' : suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
+                        const vcard = !media ? (detectVCard(msg.contact_card) || detectVCard(rawContent)) : null
+                        const locationUrl = !media && !vcard ? detectLocation(rawContent) : null
+                        const displayContent = (vcard || locationUrl) ? '' : suppressCaption ? '' : (isPlaceholder ? extraText : rawContent)
                         const hasOnlyMedia = media && !displayContent
                         const isLongText = !isPlaceholder && displayContent.length > TEXT_LIMIT
                         const isExpanded = expandedMsgIds.has(msg.id)
@@ -3005,7 +2982,7 @@ export default function CompanyConversations() {
                               <>
                                 <span style={{
                                   whiteSpace: 'pre-wrap',
-                                  ...(isDeleted ? { fontStyle: 'italic', opacity: 0.7 } : {}),
+                                  ...(msg.content === '🚫 Mensagem apagada' ? { fontStyle: 'italic', opacity: 0.7 } : {}),
                                 }}>
                                   {renderTextWithLinks(shownText, {
                                     color: isAtendente ? 'rgba(255,255,255,0.9)' : '#2563EB',
@@ -3071,7 +3048,7 @@ export default function CompanyConversations() {
                           <Pencil size={10} />
                         </button>
                       )}
-                      {isAtendente && editingMsgId !== msg.id && !isDeleted && (
+                      {isAtendente && editingMsgId !== msg.id && msg.content !== '🚫 Mensagem apagada' && (
                         <button
                           onClick={() => handleDeleteMessage(msg)}
                           disabled={deletingMsgId === msg.id}
