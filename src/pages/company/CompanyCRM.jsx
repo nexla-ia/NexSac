@@ -90,6 +90,49 @@ export default function CompanyCRM() {
   const [activeFunnel, setActiveFunnel] = useState(null)
   const [search, setSearch]           = useState('')
   const [filterTemp, setFilterTemp]   = useState('todos')
+  // Temperaturas criadas pela empresa (crm_temperatures). As tres fixas
+  // continuam no codigo; estas entram junto, identificadas pelo id.
+  const [temperatures, setTemperatures] = useState([])
+  const [tempModal, setTempModal] = useState(null) // { nome, cor } | null
+  const [tempSaving, setTempSaving] = useState(false)
+
+  // Resolve a temperatura de um lead: 'frio'/'morno'/'quente' sao as fixas,
+  // qualquer outro valor e o id de uma personalizada. Se a personalizada foi
+  // apagada, cai em Frio em vez de quebrar o card.
+  function tempOf(valor) {
+    if (TEMP[valor]) return TEMP[valor]
+    const c = temperatures.find(t => t.id === valor)
+    if (!c) return TEMP.frio
+    const cor = c.cor || '#64748B'
+    return { label: c.nome, color: cor, bg: cor + '18', dot: cor, icon: '\u25CF' }
+  }
+  // Fixas + personalizadas, na ordem em que aparecem nos seletores.
+  const tempOptions = [
+    ...Object.entries(TEMP).map(([key, v]) => ({ key, label: v.label, custom: false })),
+    ...temperatures.map(t => ({ key: t.id, label: t.nome, custom: true })),
+  ]
+
+  async function createTemperature(nome, cor) {
+    const limpo = (nome || '').trim()
+    if (!limpo || tempSaving) return
+    setTempSaving(true)
+    const maxPos = Math.max(-1, ...temperatures.map(t => t.posicao ?? 0))
+    const { data, error } = await supabase.from('crm_temperatures')
+      .insert({ instancia: instance, nome: limpo, cor: cor || '#64748B', posicao: maxPos + 1 })
+      .select().single()
+    setTempSaving(false)
+    if (error) { alert('Erro: ' + error.message); return }
+    setTemperatures(p => [...p, data])
+    setTempModal({ nome: '', cor: '#64748B' })
+  }
+
+  async function deleteTemperature(t) {
+    // Os leads que usavam esta temperatura voltam pra Frio no proximo load
+    // (tempOf ja cobre isso), entao nao precisa mexer em crm_contacts aqui.
+    const { error } = await supabase.from('crm_temperatures').delete().eq('id', t.id)
+    if (error) { alert('Erro: ' + error.message); return }
+    setTemperatures(p => p.filter(x => x.id !== t.id))
+  }
   const [dragging, setDragging]       = useState(null)
   const [dragOver, setDragOver]       = useState(null)
   const [panel, setPanel]             = useState(null)
@@ -109,15 +152,17 @@ export default function CompanyCRM() {
   async function load() {
     if (!instance) return
     setLoading(true)
-    const [{ data: fn }, { data: st }, { data: ct }, { data: kc }, { data: ls }] = await Promise.all([
+    const [{ data: fn }, { data: st }, { data: ct }, { data: kc }, { data: ls }, { data: temps }] = await Promise.all([
       supabase.from('crm_funnels').select('*').eq('instancia', instance).order('posicao'),
       supabase.from('crm_stages').select('*').eq('instancia', instance).order('posicao'),
       supabase.from('crm_contacts').select('*').eq('instancia', instance).not('removido', 'is', true).order('created_at', { ascending: false }),
       supabase.from('kanban_columns').select('id,name,color').eq('instancia', instance).order('position'),
       supabase.from('crm_lists').select('*').eq('instancia', instance).order('created_at'),
+      supabase.from('crm_temperatures').select('*').eq('instancia', instance).order('posicao'),
     ])
     if (kc) setKanbanCols(kc)
     if (ls) setLists(ls)
+    setTemperatures(temps || [])
 
     let myFunnels = fn || [], myStages = st || []
 
@@ -411,7 +456,8 @@ export default function CompanyCRM() {
     if (panel?.id === id) setPanel(p => ({...p,...changes}))
   }
 
-  const TEMP_CYCLE = ['frio', 'morno', 'quente']
+  // Clicar cicla pelas fixas E pelas personalizadas, na mesma ordem do seletor.
+  const TEMP_CYCLE = tempOptions.map(t => t.key)
   function cycleTemp(contact) {
     const next = TEMP_CYCLE[(TEMP_CYCLE.indexOf(contact.temperatura) + 1) % TEMP_CYCLE.length]
     patchContact(contact.id, { temperatura: next })
@@ -688,8 +734,15 @@ export default function CompanyCRM() {
           <select value={filterTemp} onChange={e=>setFilterTemp(e.target.value)}
             style={{ height:32, border:`1px solid ${C.border}`, borderRadius:8, fontSize:12, padding:'0 10px', background:C.card, color:C.navy, outline:'none', cursor:'pointer' }}>
             <option value="todos">Todos</option>
-            {Object.entries(TEMP).map(([k,v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+            {tempOptions.map(t => <option key={t.key} value={t.key}>{tempOf(t.key).icon} {t.label}</option>)}
           </select>
+          {/* Cada operacao classifica lead do seu jeito; frio/morno/quente nem
+              sempre serve. Aqui a empresa cria as suas. */}
+          <button onClick={() => setTempModal({ nome:'', cor:'#64748B' })}
+            title="Criar ou remover temperaturas"
+            style={{ height:32, border:`1px solid ${C.border}`, borderRadius:8, fontSize:12, padding:'0 10px', background:C.card, color:C.navy, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
+            <Plus size={13}/> Temperatura
+          </button>
         </>}
 
         <button onClick={() => { setNewForm({ nome:'', phone:'', email:'', origem:'', temperatura:'morno', stage_id: funStages[0]?.id||'', observacoes:'' }); setNewModal(true) }}
@@ -721,7 +774,7 @@ export default function CompanyCRM() {
                     const days = daysIn(c.data_entrada_etapa)
                     const over = stage?.alerta_dias ? days - stage.alerta_dias : 0
                     const veryOver = over > 14
-                    const temp = TEMP[c.temperatura] || TEMP.frio
+                    const temp = tempOf(c.temperatura)
                     return (
                       <div key={c.id} onClick={() => setPanel(c)}
                         style={{
@@ -858,7 +911,7 @@ export default function CompanyCRM() {
                   <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                     {activeListContacts.map(c => {
                       const stage = stages.find(s => s.id === c.stage_id)
-                      const temp = TEMP[c.temperatura] || TEMP.frio
+                      const temp = tempOf(c.temperatura)
                       const days = daysIn(c.data_entrada_etapa)
                       return (
                         <div key={c.id} onClick={() => setPanel(c)}
@@ -939,7 +992,7 @@ export default function CompanyCRM() {
                   const daysOverLimit = stage.alerta_dias ? days - stage.alerta_dias : 0
                   const stale = stage.alerta_dias && daysOverLimit > 0
                   const veryStale = stage.alerta_dias && daysOverLimit > 14
-                  const temp = TEMP[contact.temperatura] || TEMP.frio
+                  const temp = tempOf(contact.temperatura)
                   const initStr = initials(contact.nome, contact.phone)
                   const origemColor = ORIGEM_COLORS[contact.origem] || '#6B7280'
 
@@ -1052,7 +1105,7 @@ export default function CompanyCRM() {
       {panel && (() => {
         const c = contacts.find(x => x.id === panel.id) || panel
         const stage = stages.find(s => s.id === c.stage_id)
-        const temp = TEMP[c.temperatura] || TEMP.frio
+        const temp = tempOf(c.temperatura)
 
         return (
           <div style={{
@@ -1093,12 +1146,16 @@ export default function CompanyCRM() {
                 <div style={{ background:C.bg, borderRadius:10, padding:'10px 12px' }}>
                   <div style={{ fontSize:9.5,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4 }}>Temperatura</div>
                   <div style={{ display:'flex', gap:4 }}>
-                    {Object.entries(TEMP).map(([k,v]) => (
-                      <button key={k} onClick={() => patchContact(c.id, { temperatura:k })}
-                        style={{ flex:1, padding:'4px 2px', borderRadius:6, border:`1.5px solid ${c.temperatura===k ? v.color : C.border}`, background:c.temperatura===k ? v.bg : 'transparent', cursor:'pointer', fontSize:11, fontWeight:700, color:c.temperatura===k ? v.color : C.muted, transition:'all 0.15s' }}>
-                        {v.icon}
-                      </button>
-                    ))}
+                    {tempOptions.map(t => {
+                      const v = tempOf(t.key)
+                      const ativa = c.temperatura === t.key
+                      return (
+                        <button key={t.key} title={t.label} onClick={() => patchContact(c.id, { temperatura: t.key })}
+                          style={{ flex:1, padding:'4px 2px', borderRadius:6, border:`1.5px solid ${ativa ? v.color : C.border}`, background:ativa ? v.bg : 'transparent', cursor:'pointer', fontSize:11, fontWeight:700, color:ativa ? v.color : C.muted, transition:'all 0.15s' }}>
+                          {v.icon}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
@@ -1352,7 +1409,7 @@ export default function CompanyCRM() {
                   <label style={{ fontSize:10,fontWeight:700,color:C.muted,textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:4 }}>Temperatura</label>
                   <select value={newForm.temperatura} onChange={e=>setNewForm(p=>({...p,temperatura:e.target.value}))}
                     style={{ width:'100%',border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 10px',fontSize:13,color:C.navy,background:C.card,outline:'none',cursor:'pointer',boxSizing:'border-box' }}>
-                    {Object.entries(TEMP).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
+                    {tempOptions.map(t=><option key={t.key} value={t.key}>{tempOf(t.key).icon} {t.label}</option>)}
                   </select>
                 </div>
               </div>
@@ -1401,7 +1458,7 @@ export default function CompanyCRM() {
                     <label style={{ fontSize:11,color:C.muted,display:'block',marginBottom:3 }}>Temperatura</label>
                     <select className="nx-select" value={listModal.filtros?.temperatura||'todos'} onChange={e=>setListModal(p=>({...p,filtros:{...p.filtros,temperatura:e.target.value}}))} style={{ width:'100%',boxSizing:'border-box' }}>
                       <option value="todos">Todas</option>
-                      {Object.entries(TEMP).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}
+                      {tempOptions.map(t=><option key={t.key} value={t.key}>{tempOf(t.key).icon} {t.label}</option>)}
                     </select>
                   </div>
                   <div>
@@ -1510,6 +1567,51 @@ export default function CompanyCRM() {
               <button onClick={createKanbanCard} disabled={savingKanban||!kanbanModal.title?.trim()||!kanbanModal.column_id}
                 style={{ padding:'8px 18px',borderRadius:8,background:savingKanban||!kanbanModal.title?.trim()||!kanbanModal.column_id?C.muted:'#7C3AED',color:'#fff',border:'none',cursor:savingKanban?'wait':'pointer',fontSize:13,fontWeight:700 }}>
                 {savingKanban ? 'Criando…' : 'Criar tarefa'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gerenciar temperaturas personalizadas */}
+      {tempModal && (
+        <div onClick={() => setTempModal(null)}
+          style={{ position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background:C.card,borderRadius:14,padding:20,width:360,maxWidth:'92vw',boxShadow:'0 20px 50px rgba(0,0,0,0.25)' }}>
+            <div style={{ fontWeight:800,fontSize:15,color:C.navy,marginBottom:4 }}>Temperaturas</div>
+            <div style={{ fontSize:12,color:C.muted,marginBottom:14 }}>
+              Frio, Morno e Quente sao fixas. As que voce criar aparecem junto delas.
+            </div>
+            {temperatures.length > 0 && (
+              <div style={{ display:'flex',flexDirection:'column',gap:6,marginBottom:14 }}>
+                {temperatures.map(t => (
+                  <div key={t.id} style={{ display:'flex',alignItems:'center',gap:8,padding:'6px 10px',background:C.bg,borderRadius:8 }}>
+                    <span style={{ width:10,height:10,borderRadius:'50%',background:t.cor || '#64748B',flexShrink:0 }} />
+                    <span style={{ flex:1,fontSize:13,color:C.navy,fontWeight:600 }}>{t.nome}</span>
+                    <button onClick={() => deleteTemperature(t)} title="Remover"
+                      style={{ background:'none',border:'none',cursor:'pointer',color:'#DC2626',display:'flex',padding:2 }}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display:'flex',gap:8,alignItems:'center' }}>
+              <input value={tempModal.nome} autoFocus placeholder="Nome da temperatura"
+                onChange={e => setTempModal(m => ({ ...m, nome:e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') createTemperature(tempModal.nome, tempModal.cor) }}
+                style={{ flex:1,height:34,border:`1px solid ${C.border}`,borderRadius:8,padding:'0 10px',fontSize:13,outline:'none' }} />
+              <input type="color" value={tempModal.cor} title="Cor"
+                onChange={e => setTempModal(m => ({ ...m, cor:e.target.value }))}
+                style={{ width:34,height:34,border:`1px solid ${C.border}`,borderRadius:8,padding:2,cursor:'pointer',background:C.card }} />
+            </div>
+            <div style={{ display:'flex',gap:8,justifyContent:'flex-end',marginTop:16 }}>
+              <button onClick={() => setTempModal(null)}
+                style={{ padding:'8px 16px',borderRadius:8,background:C.bg,color:C.slate,border:'none',cursor:'pointer',fontSize:13,fontWeight:600 }}>Fechar</button>
+              <button onClick={() => createTemperature(tempModal.nome, tempModal.cor)} disabled={tempSaving || !tempModal.nome.trim()}
+                style={{ padding:'8px 16px',borderRadius:8,background:C.navy,color:'#fff',border:'none',cursor:tempSaving||!tempModal.nome.trim()?'default':'pointer',opacity:tempSaving||!tempModal.nome.trim()?0.6:1,fontSize:13,fontWeight:700 }}>
+                {tempSaving ? 'Criando...' : 'Criar'}
               </button>
             </div>
           </div>
