@@ -142,6 +142,40 @@ function mimeFromName(nome, fallback) {
   return (ext && MIME_POR_EXT[ext]) || fallback || 'application/octet-stream'
 }
 
+// O n8n não grava o nome do arquivo (a coluna `mensagem` vem nula), e docx,
+// xlsx e pptx são todos ZIP — pelos bytes iniciais os três são idênticos. Mas o
+// ZIP guarda os nomes das entradas em texto legível, e cada formato tem a sua
+// pasta: word/, xl/, ppt/. Lendo um pedaço do começo (primeiras entradas) e
+// outro do fim (diretório central, que lista todas) dá pra saber qual é.
+// ~12 KB decodificados, barato o bastante pra rodar no render.
+function sniffZip(b64) {
+  const pedaco = (ini, fim) => {
+    try {
+      const a = ini + ((4 - (ini % 4)) % 4)   // base64 decodifica de 4 em 4
+      const b = fim - (fim % 4)
+      return b > a ? atob(b64.slice(a, b)) : ''
+    } catch { return '' }
+  }
+  const s = pedaco(0, 8000) + pedaco(Math.max(0, b64.length - 8000), b64.length)
+  if (s.includes('word/')) return { ext: 'docx', mime: MIME_POR_EXT.docx }
+  if (s.includes('xl/'))   return { ext: 'xlsx', mime: MIME_POR_EXT.xlsx }
+  if (s.includes('ppt/'))  return { ext: 'pptx', mime: MIME_POR_EXT.pptx }
+  if (s.includes('opendocument.text'))        return { ext: 'odt', mime: MIME_POR_EXT.odt }
+  if (s.includes('opendocument.spreadsheet')) return { ext: 'ods', mime: MIME_POR_EXT.ods }
+  if (s.includes('opendocument.presentation'))return { ext: 'odp', mime: MIME_POR_EXT.odp }
+  return null
+}
+
+// Junta as duas pistas: o nome (quando existe) manda, senão olha dentro do ZIP.
+// Devolve o nome final já com extensão e o mime pro data URI.
+function arquivoDownload(nome, b64, mimeFallback) {
+  const temExt = /\.[a-z0-9]{2,5}$/i.test(nome || '')
+  if (temExt) return { nome, mime: mimeFromName(nome, mimeFallback) }
+  const z = (b64 || '').startsWith('UEsDB') ? sniffZip(b64) : null
+  if (z) return { nome: `${nome || 'documento'}.${z.ext}`, mime: z.mime }
+  return { nome: nome || 'documento', mime: mimeFallback || 'application/octet-stream' }
+}
+
 function detectVCard(source) {
   // Mesmo tratamento das Conversas: o vCard chega como texto da mensagem, como
   // objeto { displayName, vcard } em contact_card, ou como o vCard cru em
@@ -1430,11 +1464,14 @@ export default function CompanyGroups() {
                         {media?.type === 'file' && (() => {
                           // Documento sem visualizador. O nome vem do placeholder da mensagem.
                           const nomeArq = (fileLine || '').replace(/^(\u{1F4CE}|\u{1F4C4})\s*/u, '').trim() || 'documento'
-                          const ext = (nomeArq.split('.').pop() || '').toUpperCase().slice(0, 4)
+                          // O selo mostra a extensão do nome JÁ resolvido — senão um arquivo sem
+                                // extensão virava selo "DOCU", tirado de "documento".
+                                const arq = arquivoDownload(nomeArq, media.raw, media.mime)
+                                const ext = (arq.nome.includes('.') ? arq.nome.split('.').pop() : '').toUpperCase().slice(0, 4)
                           return (
                             <div>
-                              <a href={`data:${mimeFromName(nomeArq, media.mime)};base64,${media.raw}`}
-                                download={nomeArq} target="_blank" rel="noreferrer"
+                              <a href={`data:${arq.mime};base64,${media.raw}`}
+                                download={arq.nome} target="_blank" rel="noreferrer"
                                 style={{
                                   display: 'inline-flex', alignItems: 'center', gap: 10,
                                   background: '#F8FAFC', border: '1px solid #E2E8F0',
@@ -1445,10 +1482,10 @@ export default function CompanyGroups() {
                                   width: 32, height: 32, borderRadius: 6, background: '#E2E8F0',
                                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                                   color: '#475569', fontWeight: 700, fontSize: 9.5, flexShrink: 0,
-                                }}>{ext && ext !== nomeArq.toUpperCase() ? ext : <FileText size={16} />}</div>
+                                }}>{ext ? ext : <FileText size={16} />}</div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {nomeArq}
+                                    {arq.nome}
                                   </div>
                                   <div style={{ fontSize: 10.5, color: '#6B7280' }}>Clique para baixar</div>
                                 </div>
