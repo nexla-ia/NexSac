@@ -84,8 +84,7 @@ function detectMedia(b64) {
       : mime.startsWith('audio/') ? 'audio'
       : mime.startsWith('video/') ? 'video'
       : mime === 'application/pdf' ? 'pdf'
-      : null
-    if (!kind) return null
+      : 'file'   // docx, xlsx, zip... sem player, mas dá pra baixar
     return { type: kind, mime, src: b64, raw }
   }
   // Base64 puro — detecta pelo header
@@ -101,7 +100,16 @@ function detectMedia(b64) {
   try {
     if (b64.length > 100 && atob(b64.slice(0, 16)).slice(4, 8) === 'ftyp') return mk('video', 'video/mp4')
   } catch {}
-  return null
+  // Documentos que o WhatsApp aceita e que não têm player: Office (docx/xlsx/
+  // pptx são ZIP, começam com PK), Office legado, compactados. Antes caíam no
+  // `return null` e o arquivo chegava sem nada pra clicar.
+  if (b64.startsWith('UEsDB')) return mk('file', 'application/zip')
+  if (b64.startsWith('0M8R4K')) return mk('file', 'application/msword')
+  if (b64.startsWith('UmFyI')) return mk('file', 'application/vnd.rar')
+  if (b64.startsWith('N3q8')) return mk('file', 'application/x-7z-compressed')
+  if (b64.startsWith('H4sI')) return mk('file', 'application/gzip')
+  // Qualquer outro anexo com conteúdo: melhor oferecer o download do que sumir.
+  return mk('file', 'application/octet-stream')
 }
 
 // Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em vCard puro
@@ -1385,6 +1393,34 @@ export default function CompanyGroups() {
                                     {fileName}
                                   </div>
                                   <div style={{ fontSize: 10.5, color: '#6B7280' }}>Clique para baixar/abrir</div>
+                                </div>
+                              </a>
+                            </div>
+                          )
+                        })()}
+                        {media?.type === 'file' && (() => {
+                          // Documento sem visualizador. O nome vem do placeholder da mensagem.
+                          const nomeArq = (fileLine || '').replace(/^(\u{1F4CE}|\u{1F4C4})\s*/u, '').trim() || 'documento'
+                          const ext = (nomeArq.split('.').pop() || '').toUpperCase().slice(0, 4)
+                          return (
+                            <div>
+                              <a href={media.src} download={nomeArq} target="_blank" rel="noreferrer"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 10,
+                                  background: '#F8FAFC', border: '1px solid #E2E8F0',
+                                  borderRadius: 8, padding: '10px 14px', textDecoration: 'none',
+                                  minWidth: 200,
+                                }}>
+                                <div style={{
+                                  width: 32, height: 32, borderRadius: 6, background: '#E2E8F0',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  color: '#475569', fontWeight: 700, fontSize: 9.5, flexShrink: 0,
+                                }}>{ext && ext !== nomeArq.toUpperCase() ? ext : <FileText size={16} />}</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {nomeArq}
+                                  </div>
+                                  <div style={{ fontSize: 10.5, color: '#6B7280' }}>Clique para baixar</div>
                                 </div>
                               </a>
                             </div>

@@ -86,7 +86,17 @@ function detectMedia(b64) {
       return { type: 'video', mime: 'video/mp4' }
     }
   } catch {}
-  return null
+  // Documentos que o WhatsApp aceita e que não têm player: Office (docx/xlsx/
+  // pptx são ZIP, começam com PK), Office legado (doc/xls/ppt), OpenDocument,
+  // compactados e texto. Antes caíam no `return null` e a bolha ficava sem
+  // nada pra clicar — o arquivo chegava e não dava pra baixar.
+  if (b64.startsWith('UEsDB')) return { type: 'file', mime: 'application/zip' }        // PK.. (docx/xlsx/pptx/odt/zip)
+  if (b64.startsWith('0M8R4K')) return { type: 'file', mime: 'application/msword' }    // D0CF11E0 (doc/xls/ppt antigos)
+  if (b64.startsWith('UmFyI')) return { type: 'file', mime: 'application/vnd.rar' }   // Rar!
+  if (b64.startsWith('N3q8')) return { type: 'file', mime: 'application/x-7z-compressed' }
+  if (b64.startsWith('H4sI')) return { type: 'file', mime: 'application/gzip' }
+  // Qualquer outro anexo com conteúdo: melhor oferecer o download do que sumir.
+  return { type: 'file', mime: 'application/octet-stream' }
 }
 
 // Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em
@@ -125,8 +135,12 @@ function detectLocation(text) {
 function toImgSrc(val) {
   if (!val) return null
   if (val.startsWith('data:') || val.startsWith('http')) return val
+  // Só aproveita o mime quando o detectMedia reconheceu uma IMAGEM. Ele agora
+  // devolve application/octet-stream pra qualquer anexo não identificado, e
+  // usar isso aqui faria a foto do contato parar de renderizar — o jpeg é o
+  // palpite certo pra foto vinda do WhatsApp.
   const media = detectMedia(val)
-  const mime = media?.mime || 'image/jpeg'
+  const mime = media?.type === 'image' ? media.mime : 'image/jpeg'
   return `data:${mime};base64,${val}`
 }
 
@@ -2875,6 +2889,35 @@ export default function CompanyConversations() {
                                   </div>
                                 )
                               }
+                              if (media.type === 'file') {
+                                // Documento sem visualizador (docx, xlsx, zip...). O nome vem do
+                                // placeholder da mensagem; sem ele, usa um nome generico.
+                                const nomeArq = (fileLine || '').replace(/^(\u{1F4CE}|\u{1F4C4})\s*/u, '').trim() || 'documento'
+                                const ext = (nomeArq.split('.').pop() || '').toUpperCase().slice(0, 4)
+                                return (
+                                  <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
+                                    <a href={src} download={nomeArq} target="_blank" rel="noreferrer"
+                                      style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 10,
+                                        background: '#F8FAFC', border: '1px solid #E2E8F0',
+                                        borderRadius: 8, padding: '10px 14px', textDecoration: 'none',
+                                        minWidth: 220,
+                                      }}>
+                                      <div style={{
+                                        width: 36, height: 36, borderRadius: 6, background: '#E2E8F0',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        color: '#475569', fontWeight: 700, fontSize: 10, flexShrink: 0,
+                                      }}>{ext && ext !== nomeArq.toUpperCase() ? ext : <FileText size={18} />}</div>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          {nomeArq}
+                                        </div>
+                                        <div style={{ fontSize: 11, color: '#6B7280' }}>Clique para baixar</div>
+                                      </div>
+                                    </a>
+                                  </div>
+                                )
+                              }
                               return null
                             })()}
                             {isImage && !msg.base64 && (
@@ -3286,7 +3329,7 @@ export default function CompanyConversations() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*,application/pdf,video/*"
+                    accept="*/*"
                     style={{ display: 'none' }}
                     onChange={handlePickFile}
                   />
