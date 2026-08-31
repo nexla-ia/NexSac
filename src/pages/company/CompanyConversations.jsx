@@ -1181,22 +1181,15 @@ export default function CompanyConversations() {
       p_hora: new Date().toISOString(),
     })
 
-    // Notifica n8n que a conversa foi assumida (para IA travar) — sem message para não enviar aviso ao cliente
-    fetch('https://n8n.nexladesenvolvimento.com.br/webhook/envioNexla', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: contact.session_id,
-        phone: contact.phone,
-        instancia: instance,
-        api_instancia: apiInstancia,
-        ai_enabled: session?.company?.ai_enabled !== false,
-        company: session?.company?.name,
-        sender_name: name,
-        sender_email: session?.user?.email,
-        is_assume_event: true,
-      }),
-    }).catch(e => console.warn('webhook assumir:', e))
+    // NÃO chamar o envioNexla aqui. A intenção era só avisar o n8n pra IA
+    // travar, e por isso o payload ia sem `message` — mas o fluxo do envioNexla
+    // envia de qualquer jeito, e o cliente recebia uma mensagem vazia no
+    // WhatsApp toda vez que alguém assumia a conversa.
+    //
+    // A trava da IA não depende disso: quem marca "tem humano atendendo" é a
+    // linha em `attendances`, gravada logo acima, que o fluxo do n8n consulta
+    // antes de responder. O aviso "Atendimento assumido" continua sendo
+    // inserido em mensagens_geral e aparece na plataforma, só não sai daqui.
 
     setAttendancesMap(prev => ({
       ...prev,
