@@ -101,6 +101,35 @@ function detectMedia(b64) {
 
 // Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em
 // formato vCard puro (BEGIN:VCARD...END:VCARD) independente do que o n8n faz com o resto.
+// docx, xlsx e pptx são arquivos ZIP por dentro — a assinatura dos bytes diz
+// "zip" pra todos eles. Como o navegador salva pelo mime do data URI e não pelo
+// atributo download, um Word chegava ao disco como .zip. O NOME do arquivo é a
+// fonte confiável do tipo aqui; os bytes só dizem que é um documento.
+const MIME_POR_EXT = {
+  doc:  'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:  'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt:  'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt:  'application/vnd.oasis.opendocument.text',
+  ods:  'application/vnd.oasis.opendocument.spreadsheet',
+  odp:  'application/vnd.oasis.opendocument.presentation',
+  rtf:  'application/rtf',
+  csv:  'text/csv',
+  txt:  'text/plain',
+  xml:  'application/xml',
+  json: 'application/json',
+  zip:  'application/zip',
+  rar:  'application/vnd.rar',
+  '7z': 'application/x-7z-compressed',
+  gz:   'application/gzip',
+}
+function mimeFromName(nome, fallback) {
+  const ext = String(nome || '').split('.').pop()?.toLowerCase()
+  return (ext && MIME_POR_EXT[ext]) || fallback || 'application/octet-stream'
+}
+
 function detectVCard(source) {
   // Aceita três formas, porque o vCard chega de jeitos diferentes:
   //  1. o texto da mensagem, quando o vCard vem colado no corpo (caso antigo);
@@ -2896,7 +2925,8 @@ export default function CompanyConversations() {
                                 const ext = (nomeArq.split('.').pop() || '').toUpperCase().slice(0, 4)
                                 return (
                                   <div style={{ marginBottom: hasOnlyMedia ? 0 : 6 }}>
-                                    <a href={src} download={nomeArq} target="_blank" rel="noreferrer"
+                                    <a href={`data:${mimeFromName(nomeArq, media.mime)};base64,${msg.base64}`}
+                                      download={nomeArq} target="_blank" rel="noreferrer"
                                       style={{
                                         display: 'inline-flex', alignItems: 'center', gap: 10,
                                         background: '#F8FAFC', border: '1px solid #E2E8F0',

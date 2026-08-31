@@ -113,6 +113,35 @@ function detectMedia(b64) {
 }
 
 // Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em vCard puro
+// docx, xlsx e pptx são arquivos ZIP por dentro — a assinatura dos bytes diz
+// "zip" pra todos eles. Como o navegador salva pelo mime do data URI e não pelo
+// atributo download, um Word chegava ao disco como .zip. O NOME do arquivo é a
+// fonte confiável do tipo aqui; os bytes só dizem que é um documento.
+const MIME_POR_EXT = {
+  doc:  'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:  'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt:  'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt:  'application/vnd.oasis.opendocument.text',
+  ods:  'application/vnd.oasis.opendocument.spreadsheet',
+  odp:  'application/vnd.oasis.opendocument.presentation',
+  rtf:  'application/rtf',
+  csv:  'text/csv',
+  txt:  'text/plain',
+  xml:  'application/xml',
+  json: 'application/json',
+  zip:  'application/zip',
+  rar:  'application/vnd.rar',
+  '7z': 'application/x-7z-compressed',
+  gz:   'application/gzip',
+}
+function mimeFromName(nome, fallback) {
+  const ext = String(nome || '').split('.').pop()?.toLowerCase()
+  return (ext && MIME_POR_EXT[ext]) || fallback || 'application/octet-stream'
+}
+
 function detectVCard(source) {
   // Mesmo tratamento das Conversas: o vCard chega como texto da mensagem, como
   // objeto { displayName, vcard } em contact_card, ou como o vCard cru em
@@ -1404,7 +1433,8 @@ export default function CompanyGroups() {
                           const ext = (nomeArq.split('.').pop() || '').toUpperCase().slice(0, 4)
                           return (
                             <div>
-                              <a href={media.src} download={nomeArq} target="_blank" rel="noreferrer"
+                              <a href={`data:${mimeFromName(nomeArq, media.mime)};base64,${media.raw}`}
+                                download={nomeArq} target="_blank" rel="noreferrer"
                                 style={{
                                   display: 'inline-flex', alignItems: 'center', gap: 10,
                                   background: '#F8FAFC', border: '1px solid #E2E8F0',
