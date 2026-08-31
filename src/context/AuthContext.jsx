@@ -84,7 +84,7 @@ export function AuthProvider({ children }) {
     setDbError(null)
     const { data, error } = await supabase
       .from('companies')
-      .select('*, users(*)')
+      .select('*, users(id, name, email, role, active, company_id, created_at)')
       .order('created_at', { ascending: false })
     if (error) {
       setDbError('Erro ao carregar dados. Verifique as políticas RLS no Supabase.')
@@ -183,7 +183,7 @@ export function AuthProvider({ children }) {
 
     const { data: company, error: companyError } = await supabase
       .from('companies')
-      .select('*, users(*)')
+      .select('*, users(id, name, email, role, active, company_id, created_at)')
       .eq('id', user.company_id)
       .single()
 

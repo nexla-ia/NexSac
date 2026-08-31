@@ -210,7 +210,7 @@ export default function CompanyAdmin() {
 
   useEffect(() => {
     if (!companyId) return
-    supabase.from('users').select('*').eq('company_id', companyId).order('name')
+    supabase.from('users').select('id, name, email, role, active, company_id, created_at').eq('company_id', companyId).order('name')
       .then(({ data }) => { if (data) setUsers(data) })
   }, [companyId])
 
@@ -375,7 +375,7 @@ export default function CompanyAdmin() {
     })
     setSaving(false)
     if (error) { setUserErr(error.message); return }
-    const { data } = await supabase.from('users').select('*').eq('company_id', companyId).order('name')
+    const { data } = await supabase.from('users').select('id, name, email, role, active, company_id, created_at').eq('company_id', companyId).order('name')
     if (data) setUsers(data)
     setUserModal(false)
     setUserErr('')
