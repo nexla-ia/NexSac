@@ -115,6 +115,46 @@ export function AuthProvider({ children }) {
     return () => clearInterval(id)
   }, [session?.user?.id, session?.company?.id])
 
+  // Mantém o SETOR do usuário sincronizado com o banco. Se um admin remover a
+  // pessoa de um setor, ela perde o acesso às conversas daquele setor sem
+  // precisar deslogar. Atualiza ao abrir, a cada 60s e ao voltar pra aba.
+  useEffect(() => {
+    const uid = session?.user?.id
+    if (session?.role !== 'company' || !uid) return
+    let alive = true
+    async function refreshSector() {
+      try {
+        const { data, error } = await supabase
+          .from('sector_members')
+          .select('sector_id, sectors(id, name, color)')
+          .eq('user_id', uid)
+          .maybeSingle()
+        if (!alive || error) return
+        const next = data?.sectors || null
+        setSession(prev => {
+          if (!prev?.user) return prev
+          const curId    = prev.user.sector?.id   ?? null
+          const nextId   = next?.id   ?? null
+          const curName  = prev.user.sector?.name ?? null
+          const nextName = next?.name ?? null
+          if (curId === nextId && curName === nextName) return prev
+          return { ...prev, user: { ...prev.user, sector: next } }
+        })
+      } catch {}
+    }
+    refreshSector()
+    const id = setInterval(refreshSector, 60 * 1000)
+    const onFocus = () => refreshSector()
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    return () => {
+      alive = false
+      clearInterval(id)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+    }
+  }, [session?.user?.id])
+
   async function login(email, password, mode) {
     const { data, error } = await supabase.rpc('login_user', {
       p_email: email,

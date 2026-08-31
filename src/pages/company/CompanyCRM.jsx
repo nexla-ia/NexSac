@@ -149,6 +149,7 @@ export default function CompanyCRM() {
   const [stageModal, setStageModal]   = useState(null) // { id, nome, cor, alerta_dias, posicao, funil_id }
   const [savingStage, setSavingStage] = useState(false)
   const [funnelModal, setFunnelModal] = useState(null) // { nome }
+  const [confirmDelFunnel, setConfirmDelFunnel] = useState(null) // funil a excluir
   const [savingFunnel, setSavingFunnel] = useState(false)
 
   // ── Load ───────────────────────────────────────────────────────────────────
@@ -613,6 +614,33 @@ export default function CompanyCRM() {
     if (v !== (contact.nome || '')) patchContact(contact.id, { nome: v || null })
   }
 
+  // Excluir funil. Nao apaga lead nenhum: os que tinham este como PRINCIPAL
+  // sao movidos pro primeiro funil restante (e pra primeira etapa dele), e os
+  // vinculos extras caem por CASCADE. Sem isso, o lead ficaria apontando pra um
+  // funil que nao existe mais e sumiria do board.
+  async function deleteFunnel(f) {
+    const restantes = funnels.filter(x => x.id !== f.id)
+    if (!restantes.length) { alert('Não dá pra excluir o único funil.'); return }
+    const destino = restantes[0]
+    const primeiraEtapa = stages
+      .filter(st2 => st2.funil_id === destino.id)
+      .sort((a, b) => (a.posicao ?? 0) - (b.posicao ?? 0))[0]
+
+    const { error: e1 } = await supabase.from('crm_contacts')
+      .update({ funil_id: destino.id, stage_id: primeiraEtapa?.id || null })
+      .eq('instancia', instance).eq('funil_id', f.id)
+    if (e1) { alert('Não consegui mover os leads: ' + e1.message); return }
+
+    await supabase.from('crm_contact_funnels').delete().eq('funil_id', f.id)
+    await supabase.from('crm_stages').delete().eq('funil_id', f.id)
+    const { error: e2 } = await supabase.from('crm_funnels').delete().eq('id', f.id)
+    if (e2) { alert('Não consegui excluir o funil: ' + e2.message); return }
+
+    setConfirmDelFunnel(null)
+    if (activeFunnel === f.id) setActiveFunnel(destino.id)
+    await load()
+  }
+
   async function deleteContact(id) {
     // Soft-delete em vez de apagar a linha. O gatilho de autocriação recria o
     // lead assim que a pessoa manda mensagem de novo — apagando de verdade,
@@ -741,7 +769,10 @@ export default function CompanyCRM() {
         {/* Funil selector — separação em pipelines diferentes */}
         <div style={{ display:'flex', gap:4, marginLeft:8, alignItems:'center' }}>
           {funnels.map(f => (
-            <button key={f.id} onClick={() => setActiveFunnel(f.id)} className="crm-btn" style={{
+            <button key={f.id} onClick={() => setActiveFunnel(f.id)} className="crm-btn"
+              title={funnels.length > 1 ? 'Clique para abrir · botão direito para excluir' : undefined}
+              onContextMenu={e => { if (funnels.length > 1) { e.preventDefault(); setConfirmDelFunnel(f) } }}
+              style={{
               padding:'5px 12px', borderRadius:20, fontSize:11, fontWeight:600, cursor:'pointer',
               background: activeFunnel===f.id ? C.navy : 'transparent',
               color: activeFunnel===f.id ? '#fff' : C.slate,
@@ -1726,6 +1757,27 @@ export default function CompanyCRM() {
                 style={{ padding:'8px 16px',borderRadius:8,background:C.navy,color:'#fff',border:'none',cursor:tempSaving||!tempModal.nome.trim()?'default':'pointer',opacity:tempSaving||!tempModal.nome.trim()?0.6:1,fontSize:13,fontWeight:700 }}>
                 {tempSaving ? 'Criando...' : 'Criar'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDelFunnel && (
+        <div onClick={() => setConfirmDelFunnel(null)}
+          style={{ position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background:C.card,borderRadius:14,padding:20,width:380,maxWidth:'92vw',boxShadow:'0 20px 50px rgba(0,0,0,0.25)' }}>
+            <div style={{ fontWeight:800,fontSize:15,color:C.navy,marginBottom:8 }}>Excluir o funil "{confirmDelFunnel.nome}"?</div>
+            <div style={{ fontSize:12.5,color:C.slate,lineHeight:1.5 }}>
+              As etapas dele são apagadas. <strong>Nenhum lead é perdido</strong>: os que estavam
+              aqui vão para o funil "{funnels.filter(x => x.id !== confirmDelFunnel.id)[0]?.nome}",
+              na primeira etapa.
+            </div>
+            <div style={{ display:'flex',gap:8,justifyContent:'flex-end',marginTop:18 }}>
+              <button onClick={() => setConfirmDelFunnel(null)}
+                style={{ padding:'8px 16px',borderRadius:8,background:C.bg,color:C.slate,border:'none',cursor:'pointer',fontSize:13,fontWeight:600 }}>Cancelar</button>
+              <button onClick={() => deleteFunnel(confirmDelFunnel)}
+                style={{ padding:'8px 16px',borderRadius:8,background:'#DC2626',color:'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:700 }}>Excluir funil</button>
             </div>
           </div>
         </div>
