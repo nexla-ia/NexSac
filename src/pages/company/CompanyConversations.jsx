@@ -4,7 +4,7 @@ import EmojiPicker from 'emoji-picker-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, MailOpen, Loader2, MapPin, Contact, MoreHorizontal, Kanban, ChevronRight, Check } from 'lucide-react'
+import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, Mail, MailOpen, Loader2, MapPin, Contact, MoreHorizontal, Kanban, ChevronRight, Check } from 'lucide-react'
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import ImageLightbox from '../../components/ImageLightbox'
@@ -251,6 +251,7 @@ export default function CompanyConversations() {
   const [loadingContacts, setLoadingContacts] = useState(false)
   const [search, setSearch]           = useState('')
   const [tagFilter, setTagFilter]     = useState([])
+  const [onlyUnread, setOnlyUnread]   = useState(false) // filtro: só conversas por ler
   const { tagsOf, assignments: tagAssignments } = useContactTags(instance)
   const [selected, setSelected]       = useState(null)
   const [messages, setMessages]       = useState([])
@@ -1987,6 +1988,7 @@ export default function CompanyConversations() {
       return phoneMatch || nameMatch
     })
     .filter(c => tagMatch(c.phone))
+    .filter(c => !onlyUnread || unreadCounts[c.session_id] > 0)
   const isClosed = selected ? closed.has(selected.session_id) : false
 
   return (
@@ -2031,8 +2033,22 @@ export default function CompanyConversations() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          <div style={{ marginTop: 8 }}>
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <TagFilter instancia={instance} value={tagFilter} onChange={setTagFilter} />
+            {/* Numa fila grande, o que interessa é quem ainda não foi respondido. */}
+            <button
+              onClick={() => setOnlyUnread(v => !v)}
+              title={onlyUnread ? 'Mostrando só as não lidas' : 'Mostrar só as não lidas'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 7,
+                cursor: 'pointer',
+                background: onlyUnread ? '#2563EB' : 'var(--bg-surface)',
+                color: onlyUnread ? '#fff' : 'var(--text-secondary)',
+                border: `1px solid ${onlyUnread ? '#2563EB' : 'var(--border)'}`,
+              }}>
+              <Mail size={13} /> Não lidas
+            </button>
           </div>
           {tab !== 'finalizados' && filtered.length > 0 && (
             <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>

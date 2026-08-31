@@ -112,7 +112,7 @@ export default function CompanyCRM() {
     const [{ data: fn }, { data: st }, { data: ct }, { data: kc }, { data: ls }] = await Promise.all([
       supabase.from('crm_funnels').select('*').eq('instancia', instance).order('posicao'),
       supabase.from('crm_stages').select('*').eq('instancia', instance).order('posicao'),
-      supabase.from('crm_contacts').select('*').eq('instancia', instance).order('created_at', { ascending: false }),
+      supabase.from('crm_contacts').select('*').eq('instancia', instance).not('removido', 'is', true).order('created_at', { ascending: false }),
       supabase.from('kanban_columns').select('id,name,color').eq('instancia', instance).order('position'),
       supabase.from('crm_lists').select('*').eq('instancia', instance).order('created_at'),
     ])
@@ -362,9 +362,33 @@ export default function CompanyCRM() {
   async function createContact() {
     if (!newForm.phone.trim()) return
     setSaving(true)
+    const phone = newForm.phone.replace(/\D/g,'')
+    // O par (instancia, phone) e UNIQUE e a linha removida continua la, entao
+    // um insert direto daria erro de duplicidade. Se ja existe, revive.
+    const { data: antigo } = await supabase.from('crm_contacts')
+      .select('id, removido').eq('instancia', instance).eq('phone', phone).maybeSingle()
+    if (antigo) {
+      const { data: revivido, error: revErr } = await supabase.from('crm_contacts').update({
+        removido: false, removido_at: null,
+        nome: newForm.nome.trim() || null,
+        email: newForm.email.trim() || null,
+        origem: newForm.origem || null,
+        temperatura: newForm.temperatura,
+        stage_id: newForm.stage_id || funStages[0]?.id || null,
+        funil_id: activeFunnel,
+        observacoes: newForm.observacoes || null,
+        data_entrada_etapa: new Date().toISOString(),
+      }).eq('id', antigo.id).select().single()
+      setSaving(false)
+      if (revErr) { alert('Erro: ' + revErr.message); return }
+      setContacts(p => [revivido, ...p.filter(c => c.id !== revivido.id)])
+      setNewModal(false)
+      setNewForm({ nome:'', phone:'', email:'', origem:'', temperatura:'morno', stage_id:'', observacoes:'' })
+      return
+    }
     const { data: nc, error } = await supabase.from('crm_contacts').insert({
       instancia: instance,
-      phone: newForm.phone.replace(/\D/g,''),
+      phone,
       nome: newForm.nome.trim() || null,
       email: newForm.email.trim() || null,
       origem: newForm.origem || null,
@@ -476,7 +500,14 @@ export default function CompanyCRM() {
   }
 
   async function deleteContact(id) {
-    await supabase.from('crm_contacts').delete().eq('id', id)
+    // Soft-delete em vez de apagar a linha. O gatilho de autocriação recria o
+    // lead assim que a pessoa manda mensagem de novo — apagando de verdade,
+    // quem você tirou do funil de propósito voltava sozinho como "novo lead".
+    // Mantendo a linha marcada, o gatilho vê que o número já existe e não recria.
+    const { error } = await supabase.from('crm_contacts')
+      .update({ removido: true, removido_at: new Date().toISOString() })
+      .eq('id', id)
+    if (error) { alert('Erro ao remover: ' + error.message); return }
     setContacts(p => p.filter(c => c.id!==id))
     setConfirmDel(null)
     if (panel?.id === id) setPanel(null)
