@@ -112,6 +112,14 @@ function detectMedia(b64) {
   return mk('file', 'application/octet-stream')
 }
 
+function toImgSrc(val) {
+  if (!val) return null
+  if (val.startsWith('data:') || val.startsWith('http')) return val
+  const media = detectMedia(val)
+  const mime = media?.type === 'image' ? media.mime : 'image/jpeg'
+  return `data:${mime};base64,${val}`
+}
+
 // Contato compartilhado (vCard) — WhatsApp/Evolution API mandam o corpo em vCard puro
 // docx, xlsx e pptx são arquivos ZIP por dentro — a assinatura dos bytes diz
 // "zip" pra todos eles. Como o navegador salva pelo mime do data URI e não pelo
@@ -216,6 +224,9 @@ export default function CompanyGroups() {
   const instance = session?.company?.instance
   const apiInstancia = session?.company?.api_instancia
   const instanceOwner = session?.company?.numero_base || null
+  const contactsTable = session?.company?.contacts_table
+  const [savedContacts, setSavedContacts] = useState({}) // numero → linha (saved_contacts)
+  const [clientesMap, setClientesMap] = useState({})     // numero (só dígitos) → linha (tabela legada)
   const [groups, setGroups] = useState([])
   const [customNames, setCustomNames] = useState({}) // idgrupo → nome customizado (renomear na plataforma)
   const [lightbox, setLightbox] = useState(null) // src da imagem aberta em tela cheia
@@ -410,6 +421,42 @@ export default function CompanyGroups() {
       .catch(e => console.warn('lista de grupos:', e))
       .finally(() => setLoading(false))
   }, [instance])
+
+  // Contatos salvos — pra resolver nome/foto dos integrantes do grupo (mesmo
+  // padrão de Conversas: saved_contacts tem prioridade sobre a tabela legada)
+  useEffect(() => {
+    if (!instance) return
+    supabase.from('saved_contacts').select('*').eq('instancia', instance)
+      .then(({ data }) => {
+        if (!data) return
+        const map = {}
+        data.forEach(c => { map[c.numero] = c })
+        setSavedContacts(map)
+      })
+    const ch = supabase.channel(`groups-saved-contacts-${instance}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'saved_contacts', filter: `instancia=eq.${instance}` },
+        (p) => {
+          if (p.eventType === 'DELETE') {
+            setSavedContacts(prev => { const n = { ...prev }; delete n[p.old.numero]; return n })
+          } else if (p.new) {
+            setSavedContacts(prev => ({ ...prev, [p.new.numero]: p.new }))
+          }
+        })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [instance])
+
+  // Tabela legada de clientes (contacts_table é por empresa) — fallback de nome/foto
+  useEffect(() => {
+    if (!instance || !contactsTable) return
+    supabase.from(contactsTable).select('numero, nome, foto').eq('instancia', instance)
+      .then(({ data }) => {
+        if (!data) return
+        const map = {}
+        data.forEach(c => { if (c.numero) map[c.numero.replace(/\D/g, '')] = c })
+        setClientesMap(map)
+      })
+  }, [instance, contactsTable])
 
   // Nomes customizados (renomear grupo só na plataforma)
   useEffect(() => {
@@ -1198,6 +1245,12 @@ export default function CompanyGroups() {
                     })
                     return sorted.map((m, i) => {
                       const numero = (m.phoneNumber || '').replace(/@.*$/, '')
+                      const cleanNum = numero.replace(/\D/g, '')
+                      const savedRow = savedContacts[cleanNum] || null
+                      const clienteRow = clientesMap[cleanNum] || null
+                      const nome = savedRow?.nome || clienteRow?.nome || null
+                      const foto = toImgSrc(savedRow?.photo) || toImgSrc(clienteRow?.foto)
+                      const known = !!nome
                       const isAdmin = !!m.admin
                       const isSuperAdmin = m.admin === 'superadmin'
                       const isActive = activeMember === numero
@@ -1214,16 +1267,26 @@ export default function CompanyGroups() {
                           >
                             <div style={{
                               width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
-                              background: isSuperAdmin ? '#FEF3C7' : isAdmin ? '#EDE9FE' : '#F1F5F9',
+                              background: foto ? 'transparent' : isSuperAdmin ? '#FEF3C7' : isAdmin ? '#EDE9FE' : '#F1F5F9',
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                               color: isSuperAdmin ? '#92400E' : isAdmin ? '#7C3AED' : '#6B7280',
+                              overflow: 'hidden', fontSize: 13, fontWeight: 700,
                             }}>
-                              <Phone size={13} />
+                              {foto
+                                ? <img src={foto} alt={nome} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                : known
+                                  ? nome.charAt(0).toUpperCase()
+                                  : <Phone size={13} />}
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                +{numero}
+                              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {known ? nome : `+${numero}`}
                               </div>
+                              {known && (
+                                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                                  +{numero}
+                                </div>
+                              )}
                             </div>
                             <span style={{
                               fontSize: 10, fontWeight: 700, borderRadius: 99, padding: '2px 7px', flexShrink: 0,
@@ -1251,23 +1314,25 @@ export default function CompanyGroups() {
                               >
                                 <MessageCircle size={13} /> Conversar
                               </button>
-                              <button
-                                onClick={() => handleSaveMember(numero)}
-                                disabled={savingContact === numero}
-                                style={{
-                                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                                  padding: '7px 10px', borderRadius: 8, border: '1px solid #BBF7D0',
-                                  background: '#fff', color: '#16A34A', fontSize: 12, fontWeight: 600,
-                                  cursor: savingContact === numero ? 'default' : 'pointer',
-                                }}
-                              >
-                                {savedContact === numero
-                                  ? <><Check size={13} /> Salvo!</>
-                                  : savingContact === numero
-                                    ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Salvando…</>
-                                    : <><UserPlus size={13} /> Salvar</>
-                                }
-                              </button>
+                              {!known && (
+                                <button
+                                  onClick={() => handleSaveMember(numero)}
+                                  disabled={savingContact === numero}
+                                  style={{
+                                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                    padding: '7px 10px', borderRadius: 8, border: '1px solid #BBF7D0',
+                                    background: '#fff', color: '#16A34A', fontSize: 12, fontWeight: 600,
+                                    cursor: savingContact === numero ? 'default' : 'pointer',
+                                  }}
+                                >
+                                  {savedContact === numero
+                                    ? <><Check size={13} /> Salvo!</>
+                                    : savingContact === numero
+                                      ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Salvando…</>
+                                      : <><UserPlus size={13} /> Salvar</>
+                                  }
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1743,6 +1808,12 @@ export default function CompanyGroups() {
                     )}
                     {mentionMembers.map((m, i) => {
                       const numero = (m.phoneNumber || '').replace(/@.*$/, '')
+                      const cleanNum = numero.replace(/\D/g, '')
+                      const savedRow = savedContacts[cleanNum] || null
+                      const clienteRow = clientesMap[cleanNum] || null
+                      const nome = savedRow?.nome || clienteRow?.nome || null
+                      const foto = toImgSrc(savedRow?.photo) || toImgSrc(clienteRow?.foto)
+                      const known = !!nome
                       const isAdmin = !!m.admin
                       return (
                         <div key={i} onClick={() => handleMentionSelect(m)} style={{
@@ -1754,14 +1825,19 @@ export default function CompanyGroups() {
                         >
                           <div style={{
                             width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                            background: isAdmin ? '#EDE9FE' : '#F1F5F9',
+                            background: foto ? 'transparent' : isAdmin ? '#EDE9FE' : '#F1F5F9',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: isAdmin ? '#7C3AED' : '#6B7280', fontSize: 11,
+                            color: isAdmin ? '#7C3AED' : '#6B7280', fontSize: 11, fontWeight: 700,
+                            overflow: 'hidden',
                           }}>
-                            <Phone size={11} />
+                            {foto
+                              ? <img src={foto} alt={nome} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              : known
+                                ? nome.charAt(0).toUpperCase()
+                                : <Phone size={11} />}
                           </div>
-                          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
-                            +{numero}
+                          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: known ? 'normal' : 'tabular-nums' }}>
+                            {known ? nome : `+${numero}`}
                           </span>
                           {isAdmin && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#7C3AED', background: '#EDE9FE', borderRadius: 99, padding: '1px 6px' }}>
