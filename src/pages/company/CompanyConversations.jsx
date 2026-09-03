@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import EmojiPicker from 'emoji-picker-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, Mail, MailOpen, Loader2, MapPin, Contact, MoreHorizontal, Kanban, ChevronRight, Check } from 'lucide-react'
+import { MessageSquare, Bot, User, PhoneCall, CheckCircle2, X, Send, Headset, Sparkles, Inbox, UserCheck, Archive, Mic, Square, Trash2, Paperclip, FileText, Image as ImageIcon, Calendar, UserPlus, BookUser, Lock, ArrowRightLeft, ChevronLeft, Pencil, Film, Reply, Search, Clock, Mail, MailOpen, Loader2, MapPin, Contact, MoreHorizontal, Kanban, ChevronRight, Check, CheckCheck, AlertCircle, Copy } from 'lucide-react'
 import { useContactTags, TagPicker, TagList, TagFilter, stripPhoneSuffix, buildTagFilter } from '../../components/Tags'
 import QuickMessages from '../../components/QuickMessages'
 import ImageLightbox from '../../components/ImageLightbox'
@@ -228,6 +228,16 @@ function formatMsgTime(ts) {
   return `${date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${hhmm}`
 }
 
+function formatDiaSeparador(ts) {
+  if (!ts) return ''
+  const date = new Date(ts)
+  const now = new Date()
+  if (date.toDateString() === now.toDateString()) return 'Hoje'
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'Ontem'
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
 function formatApptShort(ts) {
   if (!ts) return ''
   const d = new Date(ts)
@@ -384,6 +394,7 @@ export default function CompanyConversations() {
   const [readsLoaded, setReadsLoaded]     = useState(false)
   const [unreadCounts, setUnreadCounts]   = useState({}) // session_id → number
   const [replyTo, setReplyTo]             = useState(null) // mensagem sendo respondida/citada
+  const [msgMenu, setMsgMenu]             = useState(null) // { x, y, msg } — menu "⋯" da mensagem
   const [highlightId, setHighlightId]     = useState(null) // id de mensagem pra piscar ao pular
   const [searchOpen, setSearchOpen]       = useState(false)
   const [searchQuery, setSearchQuery]     = useState('')
@@ -910,6 +921,9 @@ export default function CompanyConversations() {
                 contact_card: row.contact_card || null,
                 apagada: row.apagada || false,
                 reaction: row.reaction || null,
+                delivered_at: row.delivered_at || null,
+                read_at: row.read_at || null,
+                send_error_at: row.send_error_at || null,
               }]
             })
           }
@@ -924,7 +938,14 @@ export default function CompanyConversations() {
           const row = p.new
           if (!row || row.idgrupo) return
           setMessages(prev => prev.map(m => m.id === row.id
-            ? { ...m, apagada: row.apagada === true, reaction: row.reaction || null }
+            ? {
+                ...m,
+                apagada: row.apagada === true,
+                reaction: row.reaction || null,
+                delivered_at: row.delivered_at || null,
+                read_at: row.read_at || null,
+                send_error_at: row.send_error_at || null,
+              }
             : m))
         }
       )
@@ -982,6 +1003,9 @@ export default function CompanyConversations() {
             reaction: r.reaction || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
+            delivered_at: r.delivered_at || null,
+            read_at: r.read_at || null,
+            send_error_at: r.send_error_at || null,
           })))
         }
         setLoadingMsgs(false)
@@ -995,7 +1019,7 @@ export default function CompanyConversations() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction, delivered_at, read_at, send_error_at')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -1021,6 +1045,9 @@ export default function CompanyConversations() {
         reaction: r.reaction || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
+        delivered_at: r.delivered_at || null,
+        read_at: r.read_at || null,
+        send_error_at: r.send_error_at || null,
       }))
       skipScrollRef.current = true
       setMessages(prev => [...older, ...prev])
@@ -1051,7 +1078,7 @@ export default function CompanyConversations() {
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const oldestId = messages[0]?.id
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction, delivered_at, read_at, send_error_at')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -1076,6 +1103,9 @@ export default function CompanyConversations() {
         reaction: r.reaction || null,
             transcript: r.transcript || null,
             summary: r.summary || null,
+        delivered_at: r.delivered_at || null,
+        read_at: r.read_at || null,
+        send_error_at: r.send_error_at || null,
       }))
       setHasMoreMsgs(true)
       setMessages(prev => {
@@ -1797,6 +1827,16 @@ export default function CompanyConversations() {
         ) : (<><Sparkles size={11} /> {actionLabel}</>)}
       </button>
     )
+  }
+
+  async function copiarMensagem(msg) {
+    try {
+      await navigator.clipboard.writeText(msg.content || '')
+      setToast({ message: 'Mensagem copiada!', color: '#16A34A' })
+    } catch {
+      setToast({ message: 'Não deu pra copiar — seleciona o texto direto.', color: '#DC2626' })
+    }
+    setTimeout(() => setToast(null), 2500)
   }
 
   async function handleDeleteMessage(msg) {
@@ -2818,7 +2858,9 @@ export default function CompanyConversations() {
               {!loadingMsgs && messages.length === 0 && (
                 <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--text-muted)', marginTop: '2rem' }}>Sem mensagens.</div>
               )}
-              {messages.map(msg => {
+              {messages.map((msg, msgIdx) => {
+                const prevMsg = messages[msgIdx - 1]
+                const showDaySeparator = !!msg.ts && (!prevMsg?.ts || new Date(msg.ts).toDateString() !== new Date(prevMsg.ts).toDateString())
                 const isCliente    = msg.type === 'cliente'
                 const isAtendente  = msg.type === 'atendente'
                 const isLeft       = isCliente
@@ -2836,7 +2878,19 @@ export default function CompanyConversations() {
                   ? messages.find(m => m.id_mensagem === msg.quoted_id_mensagem)
                   : null
                 return (
-                  <div key={msg.id}
+                  <Fragment key={msg.id}>
+                  {showDaySeparator && (
+                    <div style={{ display: 'flex', justifyContent: 'center', margin: '14px 0' }}>
+                      <span style={{
+                        background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                        borderRadius: 20, padding: '4px 14px', fontSize: 11, fontWeight: 600,
+                        color: 'var(--text-muted)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      }}>
+                        {formatDiaSeparador(msg.ts)}
+                      </span>
+                    </div>
+                  )}
+                  <div
                     ref={el => { if (el) msgRefs.current[msg.id] = el }}
                     style={{
                       borderRadius: 10, transition: 'background-color 0.4s',
@@ -3188,56 +3242,34 @@ export default function CompanyConversations() {
                       </div>
                     )}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: isLeft ? 'flex-start' : 'flex-end', gap: 5 }}>
-                      {!isClosed && canRespond(selected) && editingMsgId !== msg.id && (
+                      {editingMsgId !== msg.id && (
                         <button
-                          onClick={() => setReplyTo(msg)}
-                          title="Responder citando"
+                          onClick={e => {
+                            const r = e.currentTarget.getBoundingClientRect()
+                            const podeResponder = !isClosed && canRespond(selected)
+                            const podeEditar = isAtendente && !msg.base64
+                            const podeApagar = isAtendente && !isDeleted
+                            const nItens = 1 + (podeResponder ? 1 : 0) + (podeEditar ? 1 : 0) + (podeApagar ? 1 : 0)
+                            const estH = nItens * 34 + 12
+                            const openUp = r.bottom + estH + 8 > window.innerHeight
+                            setMsgMenu({
+                              x: isLeft ? r.left : Math.max(4, r.right - 170),
+                              y: openUp ? Math.max(4, r.top - estH - 4) : r.bottom + 4,
+                              msg,
+                            })
+                          }}
+                          title="Mais ações"
                           style={{
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 18, height: 18, borderRadius: 4, border: 'none',
+                            width: 20, height: 20, borderRadius: 4, border: 'none',
                             background: 'transparent', cursor: 'pointer',
-                            color: 'var(--text-muted)', opacity: 0.55, padding: 0,
+                            color: '#64748B', opacity: 0.85, padding: 0,
                             transition: 'opacity 0.15s',
                           }}
                           onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                          onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}
+                          onMouseLeave={e => e.currentTarget.style.opacity = '0.85'}
                         >
-                          <Reply size={11} />
-                        </button>
-                      )}
-                      {isAtendente && !msg.base64 && editingMsgId !== msg.id && (
-                        <button
-                          onClick={() => { setEditingMsgId(msg.id); setEditingText(msg.content || '') }}
-                          title="Editar mensagem"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 18, height: 18, borderRadius: 4, border: 'none',
-                            background: 'transparent', cursor: 'pointer',
-                            color: 'var(--text-muted)', opacity: 0.55, padding: 0,
-                            transition: 'opacity 0.15s',
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                          onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}
-                        >
-                          <Pencil size={10} />
-                        </button>
-                      )}
-                      {isAtendente && editingMsgId !== msg.id && !isDeleted && (
-                        <button
-                          onClick={() => handleDeleteMessage(msg)}
-                          disabled={deletingMsgId === msg.id}
-                          title="Apagar mensagem"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 18, height: 18, borderRadius: 4, border: 'none',
-                            background: 'transparent', cursor: deletingMsgId === msg.id ? 'default' : 'pointer',
-                            color: 'var(--text-muted)', opacity: 0.55, padding: 0,
-                            transition: 'opacity 0.15s',
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                          onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}
-                        >
-                          <Trash2 size={10} />
+                          <MoreHorizontal size={15} strokeWidth={2.5} />
                         </button>
                       )}
                       {msg.ts && (
@@ -3245,8 +3277,23 @@ export default function CompanyConversations() {
                           {formatMsgTime(msg.ts)}
                         </div>
                       )}
+                      {!isCliente && !isDeleted && (
+                        msg.send_error_at ? (
+                          <span title="Falha na entrega" style={{ display: 'inline-flex', color: '#DC2626' }}>
+                            <AlertCircle size={13} />
+                          </span>
+                        ) : (
+                          <span
+                            title={msg.read_at ? `Lido às ${formatMsgTime(msg.read_at)}` : 'Enviado'}
+                            style={{ display: 'inline-flex', color: msg.read_at ? '#2563EB' : '#64748B' }}
+                          >
+                            <CheckCheck size={15} strokeWidth={2.5} />
+                          </span>
+                        )
+                      )}
                     </div>
                   </div>
+                  </Fragment>
                 )
               })}
               <div ref={bottomRef} />
@@ -3554,6 +3601,77 @@ export default function CompanyConversations() {
             Marcar como não lida
           </button>
         </div>
+      , document.body)}
+
+      {msgMenu && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 99997 }} onClick={() => setMsgMenu(null)} />
+          <div style={{
+            position: 'fixed', left: msgMenu.x, top: msgMenu.y, zIndex: 99998,
+            background: '#fff', border: '1px solid var(--border)',
+            borderRadius: 8, boxShadow: '0 6px 24px rgba(0,0,0,0.12)',
+            padding: 4, minWidth: 170,
+          }} onClick={e => e.stopPropagation()}>
+            {(() => {
+              const m = msgMenu.msg
+              const mIsAtendente = m.type === 'atendente'
+              const mIsCliente = m.type === 'cliente'
+              const mIsDeleted = m.apagada === true || m.content === '🚫 Mensagem apagada'
+              const podeResponder = !isClosed && canRespond(selected)
+              const podeEditar = mIsAtendente && !m.base64
+              const podeApagar = mIsAtendente && !mIsDeleted
+              const itemStyle = {
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                padding: '8px 12px', border: 'none', background: 'transparent',
+                fontSize: 13, cursor: 'pointer', borderRadius: 6, textAlign: 'left',
+              }
+              return (
+                <>
+                  {podeResponder && (
+                    <button
+                      onClick={() => { setReplyTo(m); setMsgMenu(null) }}
+                      style={{ ...itemStyle, color: 'var(--text-primary)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <Reply size={13} /> Responder
+                    </button>
+                  )}
+                  {!mIsDeleted && (
+                    <button
+                      onClick={() => { copiarMensagem(m); setMsgMenu(null) }}
+                      style={{ ...itemStyle, color: 'var(--text-primary)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <Copy size={13} /> Copiar
+                    </button>
+                  )}
+                  {podeEditar && (
+                    <button
+                      onClick={() => { setEditingMsgId(m.id); setEditingText(m.content || ''); setMsgMenu(null) }}
+                      style={{ ...itemStyle, color: 'var(--text-primary)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <Pencil size={13} /> Editar
+                    </button>
+                  )}
+                  {podeApagar && (
+                    <button
+                      onClick={() => { handleDeleteMessage(m); setMsgMenu(null) }}
+                      style={{ ...itemStyle, color: '#DC2626' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#FEF2F2'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <Trash2 size={13} /> Apagar
+                    </button>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+        </>
       , document.body)}
 
       {saveContactModal && createPortal(
