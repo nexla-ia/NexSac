@@ -238,6 +238,28 @@ function formatDiaSeparador(ts) {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+// Aceita string solta ("Confirmar") ou objeto cru vindo da Evolution
+// ({option}, {optionName} ou {name}) — o n8n não grava sempre no mesmo formato.
+function pollOptionText(o) {
+  if (typeof o === 'string') return o
+  return o?.option || o?.optionName || o?.name || ''
+}
+
+function pollOf(msg) {
+  if (!msg.poll_name) return null
+  const optionTexts = (msg.poll_options || []).map(pollOptionText).filter(Boolean)
+  const votesByOption = {}
+  ;[...(msg.poll_votes || []), ...(msg.poll_options || [])].forEach(v => {
+    const key = pollOptionText(v)
+    if (!key) return
+    const count = Array.isArray(v.voters) ? v.voters.length : (typeof v.votes === 'number' ? v.votes : 0)
+    votesByOption[key] = count
+  })
+  const options = optionTexts.map(text => ({ text, votes: votesByOption[text] || 0 }))
+  const total = options.reduce((s, o) => s + o.votes, 0)
+  return { name: msg.poll_name, options, total }
+}
+
 function formatApptShort(ts) {
   if (!ts) return ''
   const d = new Date(ts)
@@ -924,6 +946,10 @@ export default function CompanyConversations() {
                 delivered_at: row.delivered_at || null,
                 read_at: row.read_at || null,
                 send_error_at: row.send_error_at || null,
+                poll_name: row.poll_name || null,
+                poll_options: row.poll_options || null,
+                poll_votes: row.poll_votes || null,
+                poll_selectable_count: row.poll_selectable_count || null,
               }]
             })
           }
@@ -945,6 +971,10 @@ export default function CompanyConversations() {
                 delivered_at: row.delivered_at || null,
                 read_at: row.read_at || null,
                 send_error_at: row.send_error_at || null,
+                poll_name: row.poll_name || null,
+                poll_options: row.poll_options || null,
+                poll_votes: row.poll_votes || null,
+                poll_selectable_count: row.poll_selectable_count || null,
               }
             : m))
         }
@@ -977,7 +1007,7 @@ export default function CompanyConversations() {
     setLoadingMsgs(true)
     setMessages([])
     setHasMoreMsgs(false)
-    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction')
+    supabase.from(CONV_TABLE).select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction, delivered_at, read_at, send_error_at, poll_name, poll_options, poll_votes, poll_selectable_count')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -1006,6 +1036,10 @@ export default function CompanyConversations() {
             delivered_at: r.delivered_at || null,
             read_at: r.read_at || null,
             send_error_at: r.send_error_at || null,
+            poll_name: r.poll_name || null,
+            poll_options: r.poll_options || null,
+            poll_votes: r.poll_votes || null,
+            poll_selectable_count: r.poll_selectable_count || null,
           })))
         }
         setLoadingMsgs(false)
@@ -1019,7 +1053,7 @@ export default function CompanyConversations() {
     setLoadingMoreMsgs(true)
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction, delivered_at, read_at, send_error_at')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction, delivered_at, read_at, send_error_at, poll_name, poll_options, poll_votes, poll_selectable_count')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -1048,6 +1082,10 @@ export default function CompanyConversations() {
         delivered_at: r.delivered_at || null,
         read_at: r.read_at || null,
         send_error_at: r.send_error_at || null,
+        poll_name: r.poll_name || null,
+        poll_options: r.poll_options || null,
+        poll_votes: r.poll_votes || null,
+        poll_selectable_count: r.poll_selectable_count || null,
       }))
       skipScrollRef.current = true
       setMessages(prev => [...older, ...prev])
@@ -1078,7 +1116,7 @@ export default function CompanyConversations() {
     const prevScrollHeight = chatBodyRef.current?.scrollHeight || 0
     const oldestId = messages[0]?.id
     const { data, error } = await supabase.from(CONV_TABLE)
-      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction, delivered_at, read_at, send_error_at')
+      .select('id, id_mensagem, numero, nome, type, mensagem, base64, "horaLastMessage", created_at, quoted_id_mensagem, quoted_text, transcript, summary, contact_card, apagada, reaction, delivered_at, read_at, send_error_at, poll_name, poll_options, poll_votes, poll_selectable_count')
       .eq('instancia', instance)
       .in('numero', numeroVariants(selected.session_id))
       .is('idgrupo', null)
@@ -1106,6 +1144,10 @@ export default function CompanyConversations() {
         delivered_at: r.delivered_at || null,
         read_at: r.read_at || null,
         send_error_at: r.send_error_at || null,
+        poll_name: r.poll_name || null,
+        poll_options: r.poll_options || null,
+        poll_votes: r.poll_votes || null,
+        poll_selectable_count: r.poll_selectable_count || null,
       }))
       setHasMoreMsgs(true)
       setMessages(prev => {
@@ -2910,6 +2952,32 @@ export default function CompanyConversations() {
                     </div>
                     <div className={`msg-row ${isLeft ? 'ai' : 'client'}`}>
                       {(() => {
+                        const poll = pollOf(msg)
+                        if (poll) {
+                          const pollIsAtendente = isAtendente
+                          return (
+                            <div className="msg-bubble" style={pollIsAtendente ? { background: '#16A34A', color: '#fff', borderBottomRightRadius: 4 } : {}}>
+                              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                                {poll.name}
+                              </div>
+                              <div style={{ fontSize: 10, opacity: 0.75, marginBottom: 8 }}>Selecione uma opção</div>
+                              {poll.options.map((o, i) => {
+                                const pct = poll.total ? Math.round((o.votes / poll.total) * 100) : 0
+                                return (
+                                  <div key={i} style={{ marginBottom: i === poll.options.length - 1 ? 0 : 10 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 4 }}>
+                                      <span>○ {o.text}</span>
+                                      <span style={{ fontWeight: 600 }}>{o.votes}</span>
+                                    </div>
+                                    <div style={{ height: 3, borderRadius: 2, background: pollIsAtendente ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.1)' }}>
+                                      <div style={{ height: '100%', width: `${pct}%`, borderRadius: 2, background: pollIsAtendente ? '#fff' : '#128C7E' }} />
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )
+                        }
                         const media = detectMedia(msg.base64)
                         const rawContent = msg.content || ''
                         const fileLineMatch = rawContent.match(/^(🎤 Áudio|🖼️ [^\n]+|📄 [^\n]+|🎬 [^\n]+|📎 [^\n]+)(\n([\s\S]*))?$/)
