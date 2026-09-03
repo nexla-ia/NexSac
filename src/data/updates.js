@@ -4,6 +4,29 @@
 
 export const UPDATES = [
   {
+    date: '2026-09-03',
+    title: 'Disparo em massa — mande a mesma mensagem pra vários contatos ou grupos de uma vez',
+    type: 'feature',
+    tags: ['Disparo'],
+    items: [
+      'Nova aba "Disparo" no menu: criem uma campanha, escolham os destinatários (contatos e/ou grupos, com busca e "selecionar todos") e montem uma sequência de mensagens — texto e imagem, na ordem que quiserem.',
+      'Por segurança, cada disparo manda pra até 50 pessoas por vez, escolhidas aleatoriamente entre quem ainda falta receber — isso evita que o WhatsApp marque o número como spam. Dá pra completar o resto disparando de novo depois.',
+      'A tela mostra quantos já foram enviados, quantos ainda faltam e quantos deram erro — clicando na campanha vocês veem a lista completa separada por status.',
+    ],
+  },
+  {
+    date: '2026-09-03',
+    title: 'Visto de mensagem, menu rápido e separador de data nas Conversas',
+    type: 'improvement',
+    tags: ['Conversas', 'Grupos'],
+    items: [
+      'Mensagens que vocês mandam agora mostram o famoso ✓✓ do WhatsApp: cinza quando só foi enviada, azul quando o cliente já leu.',
+      'Trocamos os botões soltos por um menu "⋯" em cada mensagem — Responder, Copiar, Editar e Apagar num lugar só (Editar/Apagar continuam só nas mensagens de vocês).',
+      'Separador "Hoje" / "Ontem" / data aparece automaticamente entre mensagens de dias diferentes, pra ficar mais fácil de navegar em conversas longas.',
+      'Grupos: integrante que já era contato conhecido (mesmo se só cadastrado no sistema antigo da empresa) agora aparece com nome e foto na lista de Integrantes, em vez de só o número.',
+    ],
+  },
+  {
     date: '2026-07-28',
     title: 'Responder mensagem, localização, contato compartilhado e mais no Conversas/Grupos',
     type: 'feature',
