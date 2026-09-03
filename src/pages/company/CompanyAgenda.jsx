@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
@@ -32,6 +32,11 @@ const DAYS_OF_WEEK = [
   { num: 5, label: 'Sex', full: 'Sexta' },
   { num: 6, label: 'Sáb', full: 'Sábado' },
 ]
+
+// Tom de fundo (zebra) e cor sólida do cabeçalho por coluna do dia — weekDays começa na segunda
+const TODAY_ACCENT = '#2563EB'
+const TODAY_TINT = '#EFF6FF'
+const WEEK_GRID_TINTS_DEEP = ['#DBEAFE', '#D1FAE5', '#FFEDD5', '#EDE9FE', '#FEF9C3', '#FCE7F3', '#E0F2FE']
 
 const STATUS_OPTIONS = [
   { value: 'agendado',   label: 'Agendado',   color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE', icon: Calendar },
@@ -445,6 +450,8 @@ export default function CompanyAgenda() {
       reminder_offsets: session?.company?.reminder_enabled && session?.company?.reminder_offset_minutes
         ? [session.company.reminder_offset_minutes]
         : [],
+      reminder_message: '',
+      _customMsg: false,
     })
     setApptErr('')
     setPatientHistory([])
@@ -497,12 +504,49 @@ export default function CompanyAgenda() {
       extra_recipients: a.extra_recipients || [],
       reminders: a.reminders || [],
       reminder_offsets: (a.reminders || []).map(r => r.offset_minutes),
+      reminder_message: a.reminder_message || '',
+      _customMsg: !!(a.reminder_message && a.reminder_message.trim()),
       date: dateStr,
       time: timeStr,
     })
     setApptErr('')
     setPatientHistory([])
     setPatientAppts([])
+  }
+
+  // Insere {nome}/{data} na posição do cursor da textarea (em vez do
+  // usuário ter que digitar as chaves na mão).
+  const reminderMsgRef = useRef(null)
+  function insertReminderToken(token) {
+    const el = reminderMsgRef.current
+    const cur = apptModal.reminder_message || ''
+    const start = el ? el.selectionStart : cur.length
+    const end   = el ? el.selectionEnd   : cur.length
+    const next  = cur.slice(0, start) + token + cur.slice(end)
+    setApptModal(p => ({ ...p, reminder_message: next }))
+    requestAnimationFrame(() => {
+      if (!el) return
+      el.focus()
+      const pos = start + token.length
+      el.setSelectionRange(pos, pos)
+    })
+  }
+
+  // Preview do texto PADRÃO da enquete — espelha a mesma prioridade que
+  // process_appointment_reminders() usa no banco: reminder_message do
+  // procedimento > texto padrão com {nome}/{data}.
+  function pollDefaultPreview(appt) {
+    if (!appt?.date || !appt?.time || !appt?.contact_nome) return ''
+    const [, mo, day] = appt.date.split('-')
+    const proc = procedures.find(x => x.id === appt.procedure_id)
+    const tmpl = (proc?.reminder_message || '').trim()
+    if (tmpl) {
+      return tmpl
+        .replace(/\{nome\}/gi, appt.contact_nome || '')
+        .replace(/\{data\}/gi, `${day}/${mo}, ${appt.time}`)
+    }
+    const prof = professionals.find(p => p.id === appt.professional_id)
+    return `Olá ${appt.contact_nome}! 👋 Confirma sua consulta no dia ${day}/${mo} às ${appt.time}${prof ? ` com ${prof.name}` : ''}?`
   }
 
   async function handleSaveAppt() {
@@ -627,6 +671,7 @@ export default function CompanyAgenda() {
       offset_minutes: min,
       sent_at: prevReminders.find(r => r.offset_minutes === min)?.sent_at || null,
     }))
+    payload.reminder_message = apptModal._customMsg ? ((apptModal.reminder_message || '').trim() || null) : null
     payload.payment_status = paymentStatus
     payload.paid_at = paidAt
 
@@ -658,21 +703,13 @@ export default function CompanyAgenda() {
     // ─── Mensagens automáticas pro paciente (chat interno + WhatsApp) ─────
     if (numero) {
       const sessionId = `${numero}@s.whatsapp.net`
-      const dateStr   = startsAt.toLocaleString('pt-BR',
-        { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-      const firstName = (payload.contact_nome || '').split(' ')[0] || 'tudo bem'
 
-      // Só notifica automaticamente na CRIAÇÃO do agendamento — confirmar, cancelar
-      // e remarcar não disparam mais mensagem sozinhos (evita ficar avisando o
-      // cliente a cada ajuste interno). Mensagem customizada continua manual.
+      // A confirmação automática na criação saiu — quem confirma o agendamento
+      // com o paciente agora é a enquete (dispara sozinha no horário do lembrete).
+      // Mensagem customizada continua manual, se quiser mandar algo na hora.
       let patientMsg = null
       if (useCustomMsg && customMsg.trim()) {
         patientMsg = customMsg.trim()
-      } else if (isNew && payload.status !== 'cancelado') {
-        const proc = procedures.find(x => x.id === payload.procedure_id)
-        patientMsg = proc?.reminder_message?.trim()
-          ? proc.reminder_message.replace(/\{nome\}/gi, firstName).replace(/\{data\}/gi, dateStr)
-          : `Olá ${firstName}! 📅 Seu agendamento foi marcado para *${dateStr}*. Qualquer dúvida é só responder aqui!`
       }
 
       if (patientMsg) {
@@ -924,8 +961,11 @@ export default function CompanyAgenda() {
                         <div key={i} style={{
                           padding: '8px 6px', textAlign: 'center', borderLeft: '1px solid var(--border)',
                           fontSize: 12, fontWeight: 600,
-                          color: isToday ? '#2563EB' : 'var(--text-secondary)',
-                          background: isToday ? '#EFF6FF' : 'transparent',
+                          color: isToday ? TODAY_ACCENT : 'var(--text-secondary)',
+                          background: isToday ? TODAY_TINT : 'transparent',
+                          borderTop: isToday ? `2px solid ${TODAY_ACCENT}` : 'none',
+                          borderRight: isToday ? `2px solid ${TODAY_ACCENT}` : 'none',
+                          ...(isToday ? { borderLeft: `2px solid ${TODAY_ACCENT}` } : {}),
                         }}>
                           <div>{DAYS_OF_WEEK[d.getDay()].label}</div>
                           <div style={{ fontSize: 14, fontWeight: 700 }}>{String(d.getDate()).padStart(2, '0')}/{String(d.getMonth() + 1).padStart(2, '0')}</div>
@@ -938,10 +978,23 @@ export default function CompanyAgenda() {
                     <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
                       Configure horários nesta agenda.
                     </div>
-                  ) : slots.map((hhmm, idx) => (
-                    <div key={hhmm} style={{ display: 'grid', gridTemplateColumns: '64px repeat(7, 1fr)', borderBottom: idx === slots.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
-                      <div style={{ padding: '6px 8px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textAlign: 'right', borderRight: '1px solid var(--border)' }}>
-                        {hhmm}
+                  ) : (() => { let hourGroup = -1; return slots.map((hhmm, idx) => {
+                    const isHourMark = hhmm.endsWith(':00')
+                    if (isHourMark) hourGroup++
+                    const rowHourGroup = hourGroup
+                    const nextIsHourMark = slots[idx + 1]?.endsWith(':00')
+                    const isLastRow = idx === slots.length - 1
+                    const rowBorder = isLastRow ? 'none' : nextIsHourMark ? '1px solid #CBD5E1' : '1px solid #F1F5F9'
+                    return (
+                    <div key={hhmm} style={{ display: 'grid', gridTemplateColumns: '64px repeat(7, 1fr)', borderBottom: rowBorder }}>
+                      <div style={{
+                        padding: '6px 8px', textAlign: 'right', borderRight: '1px solid var(--border)',
+                        fontSize: isHourMark ? 12 : 10,
+                        fontWeight: isHourMark ? 700 : 500,
+                        color: isHourMark ? 'var(--text-primary)' : 'var(--text-muted)',
+                        opacity: isHourMark ? 1 : 0.7,
+                      }}>
+                        {isHourMark ? hhmm : hhmm.slice(-2) === '30' ? '30' : hhmm}
                       </div>
                       {weekDays.map((d, i) => {
                         const working = isWorkingDay(d)
@@ -950,7 +1003,8 @@ export default function CompanyAgenda() {
                         const slotKey = `${fmtDateInput(d)}_${hhmm}`
                         const isDragOver = dragOverSlot === slotKey
                         const block = working ? blockAt(d, hhmm) : null
-                        const zebra = idx % 2 === 1
+                        const isTodayCol = d.toDateString() === new Date().toDateString()
+                        const dayColor = WEEK_GRID_TINTS_DEEP[i % WEEK_GRID_TINTS_DEEP.length]
                         return (
                           <div key={i}
                             onClick={() => {
@@ -992,21 +1046,30 @@ export default function CompanyAgenda() {
                             }}
                             title={block ? `Bloqueado: ${block.reason || 'sem motivo'} — clique para desbloquear` : undefined}
                             style={{
-                              minHeight: 46, borderLeft: '1px solid var(--border)',
+                              minHeight: 46,
+                              borderLeft: isTodayCol ? `2px solid ${TODAY_ACCENT}` : '1px solid var(--border)',
+                              borderRight: isTodayCol ? `2px solid ${TODAY_ACCENT}` : 'none',
+                              borderBottom: isTodayCol && isLastRow ? `2px solid ${TODAY_ACCENT}` : 'none',
                               background: isDragOver ? '#DBEAFE'
                                 : block ? 'repeating-linear-gradient(45deg, #F1F5F9, #F1F5F9 6px, #E2E8F0 6px, #E2E8F0 12px)'
                                 : !working ? '#F9FAFB'
-                                : zebra ? '#FAFBFC'
-                                : 'transparent',
+                                : dayColor,
                               cursor: working ? (block ? 'not-allowed' : 'pointer') : 'not-allowed',
                               padding: 3, position: 'relative',
                               transition: 'background 0.1s',
                               outline: isDragOver ? '2px dashed #2563EB' : 'none',
                               outlineOffset: '-2px',
                             }}
-                            onMouseEnter={e => { if (working && !appt && !block && !draggingId) e.currentTarget.style.background = '#EFF6FF' }}
-                            onMouseLeave={e => { if (working && !appt && !block && !isDragOver) e.currentTarget.style.background = zebra ? '#FAFBFC' : 'transparent' }}
+                            onMouseEnter={e => { if (working && !appt && !block && !draggingId) e.currentTarget.style.background = '#93C5FD' }}
+                            onMouseLeave={e => { if (working && !appt && !block && !isDragOver) e.currentTarget.style.background = dayColor }}
                           >
+                            {isTodayCol && isLastRow && (
+                              <div style={{
+                                position: 'absolute', bottom: -5, right: -5,
+                                width: 8, height: 8, borderRadius: '50%',
+                                background: TODAY_ACCENT, zIndex: 2,
+                              }} />
+                            )}
                             {block && !appt && (
                               <div style={{
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
@@ -1059,7 +1122,7 @@ export default function CompanyAgenda() {
                         )
                       })}
                     </div>
-                  ))}
+                  )}) })()}
                 </div>
               </div>
             </div>
@@ -1696,6 +1759,79 @@ export default function CompanyAgenda() {
                   </button>
                 </div>
               </div>
+
+              {/* Mensagem do lembrete: vira a pergunta da enquete (padrão ou personalizada) */}
+              {(apptModal.reminder_offsets || []).length > 0 && (
+                <div style={{ marginTop: 4, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    📊 Pergunta da enquete
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                    É enviada como enquete no WhatsApp. Dá pra editar o texto da pergunta — as opções são fixas:
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    {['Confirmar', 'Cancelar'].map(label => (
+                      <span key={label} style={{
+                        padding: '5px 12px', borderRadius: 20, fontSize: 11.5, fontWeight: 600,
+                        border: '1.5px solid var(--border)', background: '#F8FAFC', color: 'var(--text-muted)',
+                      }}>
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: apptModal._customMsg ? 8 : 0 }}>
+                    {[{ v: false, label: 'Padrão' }, { v: true, label: 'Personalizada' }].map(o => {
+                      const active = !!apptModal._customMsg === o.v
+                      return (
+                        <button key={o.label} type="button"
+                          onClick={() => setApptModal(p => ({ ...p, _customMsg: o.v, ...(o.v ? {} : { reminder_message: '' }) }))}
+                          style={{ padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: `1.5px solid ${active ? '#2563EB' : 'var(--border)'}`, background: active ? '#EFF6FF' : '#fff', color: active ? '#1D4ED8' : 'var(--text-secondary)' }}>
+                          {o.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {apptModal._customMsg ? (
+                    <>
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                        {[{ token: '{nome}', label: 'Nome do paciente' }, { token: '{data}', label: 'Data/hora' }].map(b => (
+                          <button key={b.token} type="button" title={`Inserir ${b.label}`}
+                            onClick={() => insertReminderToken(b.token)}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '4px 10px', borderRadius: 6, fontSize: 11.5, fontWeight: 600,
+                              border: '1px solid #BFDBFE', background: '#EFF6FF', color: '#1D4ED8', cursor: 'pointer',
+                            }}>
+                            <Plus size={11} /> {b.token}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea ref={reminderMsgRef} className="nx-input" rows={3} value={apptModal.reminder_message || ''}
+                        onChange={e => setApptModal(p => ({ ...p, reminder_message: e.target.value }))}
+                        placeholder="Ex: Olá {nome}! Confirma sua sessão em {data}?"
+                        style={{ resize: 'vertical', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+                      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 5 }}>
+                        Clique nos botões acima pra inserir o nome do paciente ou a data/hora sem digitar as chaves. Enviada no(s) horário(s) marcados acima.
+                      </div>
+                    </>
+                  ) : (
+                    <div>
+                      <div style={{
+                        fontSize: 12.5, color: 'var(--text-primary)', background: '#F8FAFC',
+                        border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px',
+                        lineHeight: 1.45, whiteSpace: 'pre-wrap',
+                      }}>
+                        {pollDefaultPreview(apptModal) || 'Preencha nome, data e hora pra ver o texto.'}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 5 }}>
+                        {procedures.find(x => x.id === apptModal.procedure_id)?.reminder_message?.trim()
+                          ? 'Texto padrão configurado no procedimento.'
+                          : 'Texto padrão da enquete (nenhuma personalização no procedimento).'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                 <div>
