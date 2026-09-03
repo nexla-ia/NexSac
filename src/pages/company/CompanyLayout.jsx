@@ -208,7 +208,7 @@ export default function CompanyLayout() {
     { to: '/painel/seguranca', icon: ShieldCheck,   label: 'Segurança' },
     { to: '/painel/tutorial', icon: GraduationCap, label: 'Tutorial' },
     { to: '/painel/novidades', icon: Sparkles,      label: 'Novidades',
-      badge: hasNewUpdate ? 'Novo' : null, badgeColor: 'violet' },
+      badge: hasNewUpdate ? '!' : null, badgeColor: 'violet' },
     { to: '/painel/feedback',  icon: MessageSquareHeart, label: 'Feedback' },
     { key: 'suporte', icon: Headset, label: 'Suporte',
       onClick: () => setSupportOpen(true), active: supportOpen,
